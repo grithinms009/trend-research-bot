@@ -84,3 +84,5 @@ Topic clusters saved to: /Users/grithin.mssynctric.in/.gemini/antigravity/scratc
     age_hours = (datetime.now(timezone.utc) - newest).total_seconds() / 3600
 TypeError: can't subtract offset-naive and offset-aware datetimes
 
+2026-02-17 19:08:00,719 - INFO - ========== PIPELINE START ==========
+2026-02-17 19:08:00,719 - INFO - STARTING app.scraper.topic_scraper
