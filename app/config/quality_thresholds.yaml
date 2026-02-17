@@ -1,0 +1,6 @@
+quality:
+  hook_strength: 0.7
+  clarity: 0.75
+  retention_structure: 0.7
+  cta_presence: 0.6
+  minimum_quality_score: 0.72

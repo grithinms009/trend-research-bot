@@ -1,0 +1,6 @@
+models:
+  C1: "llama3"
+  C2: "mistral:instruct"
+  C3: "phi3:mini"
+  C4: "llama3"
+  C5: "mistral:instruct"

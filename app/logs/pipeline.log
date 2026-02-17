@@ -1,0 +1,86 @@
+2026-02-14 15:21:54,175 - INFO - ========== PIPELINE START ==========
+2026-02-14 15:21:54,175 - INFO - STARTING app.scraper.topic_scraper
+2026-02-14 15:23:05,975 - INFO - ========== PIPELINE START ==========
+2026-02-14 15:23:05,975 - INFO - STARTING app.scraper.topic_scraper
+2026-02-14 15:24:33,355 - INFO - ========== PIPELINE START ==========
+2026-02-14 15:24:33,356 - INFO - STARTING app.scraper.topic_scraper
+2026-02-14 15:25:16,501 - INFO - COMPLETED app.scraper.topic_scraper in 43.15s
+2026-02-14 15:25:16,502 - INFO - Starting topic scraping...
+Running RedditCollector...
+Error fetching article for https://www.reuters.com/world/middle-east/us-military-preparing-potentially-weeks-long-iran-operations-2026-02-13/?utm_source=braze&utm_medium=notifications&utm_campaign=2025_engagement: Article `download()` failed with 401 Client Error: HTTP Forbidden for url: https://www.reuters.com/world/middle-east/us-military-preparing-potentially-weeks-long-iran-operations-2026-02-13/?utm_source=braze&utm_medium=notifications&utm_campaign=2025_engagement on URL https://www.reuters.com/world/middle-east/us-military-preparing-potentially-weeks-long-iran-operations-2026-02-13/?utm_source=braze&utm_medium=notifications&utm_campaign=2025_engagement
+Error fetching article for https://thehill.com/policy/international/5737485-us-leadership-challenged-merz/: Article `download()` failed with 403 Client Error: Forbidden for url: https://thehill.com/policy/international/5737485-us-leadership-challenged-merz/ on URL https://thehill.com/policy/international/5737485-us-leadership-challenged-merz/
+Error fetching article for https://www.itv.com/news/2026-02-13/uk-must-move-away-from-us-and-towards-a-more-european-nato-starmer-to-say: Article `download()` failed with HTTPSConnectionPool(host='www.itv.com', port=443): Read timed out. (read timeout=7) on URL https://www.itv.com/news/2026-02-13/uk-must-move-away-from-us-and-towards-a-more-european-nato-starmer-to-say
+Error fetching article for https://www.reuters.com/world/time-europe-become-geopolitical-power-frances-macron-says-2026-02-13/: Article `download()` failed with 401 Client Error: HTTP Forbidden for url: https://www.reuters.com/world/time-europe-become-geopolitical-power-frances-macron-says-2026-02-13/ on URL https://www.reuters.com/world/time-europe-become-geopolitical-power-frances-macron-says-2026-02-13/
+Collected 20 topics from RedditCollector
+Sample summary from RedditCollector: π Rendered by PID 180272 on reddit-service-r2-loggedout-canary-68c9bc4959-vvn99 at 2026-02-14 09:54:...
+Running TwitterCollector...
+Collected 20 topics from TwitterCollector
+Running YouTubeCollector...
+No topics collected from YouTubeCollector
+Total raw topics collected: 40
+Ranked 40 topics
+Topics saved to: /Users/grithin.mssynctric.in/.gemini/antigravity/scratch/ai-factory/data/topics/20260214_1525.json
+
+2026-02-14 15:25:16,502 - INFO - STARTING app.scraper.topic_cleaner
+2026-02-14 15:25:16,565 - INFO - COMPLETED app.scraper.topic_cleaner in 0.06s
+2026-02-14 15:25:16,565 - INFO - Cleaning topics...
+Cleaned topics saved to: /Users/grithin.mssynctric.in/.gemini/antigravity/scratch/ai-factory/data/topics_clean/20260214_1525.json
+
+2026-02-14 15:25:16,565 - INFO - STARTING app.analyzer.topic_analyzer
+2026-02-14 15:25:16,599 - INFO - COMPLETED app.analyzer.topic_analyzer in 0.03s
+2026-02-14 15:25:16,599 - INFO - Analyzing topics...
+Analyzed topics saved to: /Users/grithin.mssynctric.in/.gemini/antigravity/scratch/ai-factory/data/topics_analyzed/20260214_1525.json
+
+2026-02-14 15:25:16,599 - INFO - STARTING app.analyzer.topic_cluster
+2026-02-14 15:25:16,635 - INFO - COMPLETED app.analyzer.topic_cluster in 0.04s
+2026-02-14 15:25:16,635 - INFO - Clustering topics...
+Topic clusters saved to: /Users/grithin.mssynctric.in/.gemini/antigravity/scratch/ai-factory/data/topic_clusters/20260214_1525.json
+
+2026-02-14 15:25:16,635 - INFO - STARTING app.analyzer.topic_prioritizer
+2026-02-14 15:27:23,505 - INFO - ========== PIPELINE START ==========
+2026-02-14 15:27:23,505 - INFO - STARTING app.scraper.topic_scraper
+2026-02-14 15:28:05,939 - INFO - COMPLETED app.scraper.topic_scraper in 42.43s
+2026-02-14 15:28:05,940 - INFO - Starting topic scraping...
+Running RedditCollector...
+Error fetching article for https://www.reuters.com/world/middle-east/us-military-preparing-potentially-weeks-long-iran-operations-2026-02-13/?utm_source=braze&utm_medium=notifications&utm_campaign=2025_engagement: Article `download()` failed with 401 Client Error: HTTP Forbidden for url: https://www.reuters.com/world/middle-east/us-military-preparing-potentially-weeks-long-iran-operations-2026-02-13/?utm_source=braze&utm_medium=notifications&utm_campaign=2025_engagement on URL https://www.reuters.com/world/middle-east/us-military-preparing-potentially-weeks-long-iran-operations-2026-02-13/?utm_source=braze&utm_medium=notifications&utm_campaign=2025_engagement
+Error fetching article for https://thehill.com/policy/international/5737485-us-leadership-challenged-merz/: Article `download()` failed with 403 Client Error: Forbidden for url: https://thehill.com/policy/international/5737485-us-leadership-challenged-merz/ on URL https://thehill.com/policy/international/5737485-us-leadership-challenged-merz/
+Error fetching article for https://www.itv.com/news/2026-02-13/uk-must-move-away-from-us-and-towards-a-more-european-nato-starmer-to-say: Article `download()` failed with HTTPSConnectionPool(host='www.itv.com', port=443): Read timed out. (read timeout=7) on URL https://www.itv.com/news/2026-02-13/uk-must-move-away-from-us-and-towards-a-more-european-nato-starmer-to-say
+Error fetching article for https://www.reuters.com/world/time-europe-become-geopolitical-power-frances-macron-says-2026-02-13/: Article `download()` failed with 401 Client Error: HTTP Forbidden for url: https://www.reuters.com/world/time-europe-become-geopolitical-power-frances-macron-says-2026-02-13/ on URL https://www.reuters.com/world/time-europe-become-geopolitical-power-frances-macron-says-2026-02-13/
+Collected 20 topics from RedditCollector
+Sample summary from RedditCollector: π Rendered by PID 88 on reddit-service-r2-loggedout-867999b997-fbb87 at 2026-02-14 09:57:25.301871+0...
+Running TwitterCollector...
+Collected 20 topics from TwitterCollector
+Running YouTubeCollector...
+No topics collected from YouTubeCollector
+Total raw topics collected: 40
+Ranked 40 topics
+Topics saved to: /Users/grithin.mssynctric.in/.gemini/antigravity/scratch/ai-factory/data/topics/20260214_1528.json
+
+2026-02-14 15:28:05,940 - INFO - STARTING app.scraper.topic_cleaner
+2026-02-14 15:28:05,998 - INFO - COMPLETED app.scraper.topic_cleaner in 0.06s
+2026-02-14 15:28:05,998 - INFO - Cleaning topics...
+Cleaned topics saved to: /Users/grithin.mssynctric.in/.gemini/antigravity/scratch/ai-factory/data/topics_clean/20260214_1528.json
+
+2026-02-14 15:28:05,998 - INFO - STARTING app.analyzer.topic_analyzer
+2026-02-14 15:28:06,030 - INFO - COMPLETED app.analyzer.topic_analyzer in 0.03s
+2026-02-14 15:28:06,030 - INFO - Analyzing topics...
+Analyzed topics saved to: /Users/grithin.mssynctric.in/.gemini/antigravity/scratch/ai-factory/data/topics_analyzed/20260214_1528.json
+
+2026-02-14 15:28:06,030 - INFO - STARTING app.analyzer.topic_cluster
+2026-02-14 15:28:06,063 - INFO - COMPLETED app.analyzer.topic_cluster in 0.03s
+2026-02-14 15:28:06,063 - INFO - Clustering topics...
+Topic clusters saved to: /Users/grithin.mssynctric.in/.gemini/antigravity/scratch/ai-factory/data/topic_clusters/20260214_1528.json
+
+2026-02-14 15:28:06,063 - INFO - STARTING app.analyzer.topic_prioritizer
+2026-02-14 15:28:06,095 - ERROR - FAILED app.analyzer.topic_prioritizer after 0.03s
+2026-02-14 15:28:06,095 - ERROR - Traceback (most recent call last):
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py", line 197, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py", line 87, in _run_code
+    exec(code, run_globals)
+  File "/Users/grithin.mssynctric.in/.gemini/antigravity/scratch/ai-factory/app/analyzer/topic_prioritizer.py", line 54, in <module>
+    c["priority_score"] = compute_priority(c)
+  File "/Users/grithin.mssynctric.in/.gemini/antigravity/scratch/ai-factory/app/analyzer/topic_prioritizer.py", line 32, in compute_priority
+    age_hours = (datetime.now(timezone.utc) - newest).total_seconds() / 3600
+TypeError: can't subtract offset-naive and offset-aware datetimes
+

@@ -1,0 +1,10 @@
+{
+    "pythonVersion": "3.9",
+    "pythonPlatform": "Darwin",
+    "reportMissingImports": "warning",
+    "extraPaths": [
+        ".",
+        "/Users/grithin.mssynctric.in/Library/Python/3.9/lib/python/site-packages",
+        "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/site-packages"
+    ]
+}

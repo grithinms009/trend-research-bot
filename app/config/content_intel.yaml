@@ -1,0 +1,41 @@
+connectors:
+  youtube_trending:
+    enabled: true
+    regions: ["US", "IN"]
+  google_trends:
+    enabled: true
+    regions: ["US", "GB", "IN"]
+  news_rss:
+    enabled: true
+    feeds:
+      - "https://news.google.com/rss/search?q=technology"
+      - "https://news.google.com/rss/search?q=finance"
+  reddit_topics:
+    enabled: true
+    subreddits: ["technology", "finance", "history", "travel", "productivity"]
+  x_social:
+    enabled: false
+    search_terms: ["AI news", "stock market", "science facts", "luxury travel", "life hacks"]
+
+categories:
+  ai_news:
+    keywords: ["ai", "artificial intelligence", "machine learning", "robotics", "automation", "chip", "software", "tech"]
+  finance:
+    keywords: ["stock", "market", "finance", "crypto", "economy", "inflation", "investment"]
+  history_science:
+    keywords: ["history", "ancient", "science", "discovery", "space", "physics", "biology"]
+  luxury_travel:
+    keywords: ["luxury", "travel", "resort", "hotel", "yacht", "destination"]
+  productivity:
+    keywords: ["productivity", "life hack", "habits", "routine", "self improvement"]
+
+queue:
+  backend: redis
+  redis:
+    host: "localhost"
+    port: 6379
+    topic_stream: "content_topics"
+
+scoring:
+  freshness_half_life_hours: 12
+  monetization_baseline: 0.4

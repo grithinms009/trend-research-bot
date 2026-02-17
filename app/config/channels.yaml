@@ -1,0 +1,31 @@
+channels:
+  C1:
+    name: "AI News & Tools"
+    category: "Tech"
+    target_count: 8
+    model: "mistral:instruct"
+    tone: "breaking news"
+  C2:
+    name: "Daily Market Bites"
+    category: "Finance"
+    target_count: 6
+    model: "mistral:instruct"
+    tone: "market update"
+  C3:
+    name: "Did You Know"
+    category: "History/Science"
+    target_count: 6
+    model: "llama3"
+    tone: "storytelling"
+  C4:
+    name: "Luxury / Travel Top 5"
+    category: "Luxury/Travel"
+    target_count: 5
+    model: "llama3"
+    tone: "cinematic"
+  C5:
+    name: "Life Hacks / Productivity"
+    category: "Productivity"
+    target_count: 5
+    model: "mistral"
+    tone: "actionable tips"

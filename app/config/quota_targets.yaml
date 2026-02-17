@@ -1,0 +1,8 @@
+daily_quota:
+  C1: 8
+  C2: 6
+  C3: 6
+  C4: 5
+  C5: 5
+fallback:
+  max_per_run: 5
