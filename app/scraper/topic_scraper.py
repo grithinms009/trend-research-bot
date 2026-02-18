@@ -3,7 +3,7 @@ import json
 import yaml
 import logging
 from datetime import datetime, date
-from typing import Any
+from typing import Any, List, Tuple
 from urllib.parse import quote_plus
 
 import feedparser
@@ -51,6 +51,7 @@ class TopicScraper:
         self.metrics = {
             "topics_scraped": 0,
             "topics_with_articles": 0,
+            "topics_discarded_no_article": 0,
         }
 
     def run(self):
@@ -140,39 +141,66 @@ class TopicScraper:
         prepared.setdefault("keywords", [])
         prepared.setdefault("source", "")
 
-        url = prepared.get("url", "")
-        if not url:
-            discovered_url, discovered_published = self._discover_article_from_search(prepared["title"])
-            url = discovered_url
-            prepared["url"] = url
-            if discovered_published and not prepared.get("published_at"):
-                prepared["published_at"] = discovered_published
-
-        article_text = (prepared.get("article_text") or "").strip()
         summary = (prepared.get("summary") or "").strip()
+        published_at = prepared.get("published_at", "")
 
-        if url and len(article_text) < self.MIN_ARTICLE_CHARS:
+        candidate_urls = self._gather_candidate_urls(prepared)
+        article_text = ""
+        chosen_url = ""
+
+        for url, candidate_published in candidate_urls:
+            if not url:
+                continue
+
             extracted_text, extracted_summary, extracted_published = self._extract_article(url)
-            if extracted_text:
+            if extracted_text and len(extracted_text) >= self.MIN_ARTICLE_CHARS:
                 article_text = extracted_text
-            if extracted_summary and not summary:
-                summary = extracted_summary
-            if extracted_published and not prepared.get("published_at"):
-                prepared["published_at"] = extracted_published
+                chosen_url = url
+                summary = extracted_summary or summary or prepared["title"]
+                published_at = (
+                    extracted_published
+                    or candidate_published
+                    or published_at
+                )
+                break
 
-        if not url or len(article_text) < self.MIN_ARTICLE_CHARS:
+        if not article_text or len(article_text) < self.MIN_ARTICLE_CHARS:
+            self.metrics["topics_discarded_no_article"] += 1
+            logger.debug(
+                "Discarded topic '%s' — unable to verify article >= %s chars",
+                prepared.get("title", "unknown"),
+                self.MIN_ARTICLE_CHARS,
+            )
             return None
 
+        prepared["url"] = chosen_url or prepared.get("url", "")
         prepared["article_text"] = article_text
         prepared["summary"] = self._shorten_summary(summary or prepared["title"])
         prepared["keywords"] = prepared.get("keywords") or self._extract_keywords(article_text)
+        prepared["published_at"] = published_at
         prepared["validated_at"] = datetime.now().isoformat()
 
         return prepared
 
-    def _discover_article_from_search(self, title: str):
+    def _gather_candidate_urls(self, prepared: dict) -> List[Tuple[str, str]]:
+        candidates: List[Tuple[str, str]] = []
+        seen = set()
+
+        existing_url = prepared.get("url", "")
+        if existing_url:
+            candidates.append((existing_url, prepared.get("published_at", "")))
+            seen.add(existing_url)
+
+        for url, published in self._discover_articles_from_search(prepared.get("title", "")):
+            if url and url not in seen:
+                candidates.append((url, published))
+                seen.add(url)
+
+        return candidates
+
+    def _discover_articles_from_search(self, title: str, max_results: int = 5) -> List[Tuple[str, str]]:
         if not title:
-            return "", ""
+            return []
 
         query = quote_plus(title)
         search_url = self.SEARCH_RSS_TEMPLATE.format(query=query)
@@ -180,17 +208,20 @@ class TopicScraper:
             feed = feedparser.parse(search_url)
         except Exception as exc:
             logger.debug(f"Search feed failed for {title}: {exc}")
-            return "", ""
+            return []
 
+        results: List[Tuple[str, str]] = []
         for entry in feed.entries:
             link = getattr(entry, "link", "")
             if not link:
                 continue
             published_raw = getattr(entry, "published", "")
             published_at = self._safe_parse_datetime(published_raw)
-            return link, published_at
+            results.append((link, published_at))
+            if len(results) >= max_results:
+                break
 
-        return "", ""
+        return results
 
     def _extract_article(self, url: str):
         article_text = ""
