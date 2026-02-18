@@ -28,6 +28,7 @@ PIPELINE = [
     "app.scraper.topic_scraper",
     "app.scraper.topic_cleaner",
     "app.analyzer.topic_analyzer",
+    "app.analyzer.topic_content_validator",
     "app.analyzer.topic_cluster",
     "app.analyzer.topic_prioritizer",
     "app.dispatcher.topic_dispatcher",
@@ -40,6 +41,7 @@ STAGE_DATA_DIRS = {
     "app.scraper.topic_scraper": ("data/topics", "scraped"),
     "app.scraper.topic_cleaner": ("data/topics_clean", "cleaned"),
     "app.analyzer.topic_analyzer": ("data/topics_analyzed", "analyzed"),
+    "app.analyzer.topic_content_validator": ("data/topics_validated", "validated"),
     "app.analyzer.topic_cluster": ("data/topic_clusters", "clustered"),
     "app.analyzer.topic_prioritizer": ("data/topic_queue", "queued"),
     "app.dispatcher.topic_dispatcher": ("data/topic_generated", "dispatched"),
@@ -158,6 +160,7 @@ def print_health_report():
     scraped = count_items_in_latest_json("data/topics")
     cleaned = count_items_in_latest_json("data/topics_clean")
     analyzed = count_items_in_latest_json("data/topics_analyzed")
+    validated = count_items_in_latest_json("data/topics_validated")
     
     # For clusters, count both clusters and total topics
     cluster_dir = os.path.join(BASE_DIR, "data", "topic_clusters")
@@ -182,6 +185,7 @@ def print_health_report():
     print(f"  Scraped (raw topics):    {scraped}")
     print(f"  Cleaned (valid):         {cleaned}")
     print(f"  Analyzed:                {analyzed}")
+    print(f"  Validated:              {validated}")
     print(f"  Clusters:                {cluster_count} (containing {clustered_topics} topics)")
     print(f"  Queued (prioritized):    {queued}")
     print(f"  Dispatched:              {dispatched}")
@@ -190,10 +194,12 @@ def print_health_report():
     # Success rate
     if scraped > 0:
         clean_rate = (cleaned / scraped) * 100
+        validated_rate = (validated / cleaned) * 100 if cleaned > 0 else 0
         gen_rate = (generated / scraped) * 100 if generated > 0 else 0
         print(f"\n  📈 Success Rates:")
         print(f"  {'─' * 40}")
         print(f"  Extraction → Clean:     {clean_rate:.1f}%")
+        print(f"  Clean → Validated:      {validated_rate:.1f}%")
         print(f"  End-to-End (→ Script):   {gen_rate:.1f}%")
 
     # Per-stage timing

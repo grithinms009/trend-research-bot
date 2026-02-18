@@ -17,7 +17,8 @@ from app.workers.topic_script_generator import TopicScriptGenerator
 
 logger = logging.getLogger(__name__)
 
-MAX_PARALLEL_WORKERS = 3
+MAX_PARALLEL_WORKERS = 2  # reduce concurrent pressure on Ollama
+GENERATION_COOLDOWN_SECONDS = 5  # rest between back-to-back generations
 
 
 class TopicGeneratorWorker:
@@ -48,16 +49,19 @@ class TopicGeneratorWorker:
             script = self.generator.generate_script(req)
             duration = round(time.time() - start, 2)
             self.metrics["per_script_times"].append(duration)
-            
+
             if script:
                 logger.info("Generated script for '%s' in %ss", title, duration)
-                return script, fpath
             else:
                 logger.info("Skipped script for '%s' (no output) in %ss", title, duration)
-                return None, fpath
+
+            return script, fpath
         except Exception as exc:
             logger.error("Error generating script for '%s': %s", title, exc)
             return None, fpath
+        finally:
+            # Give the local Ollama server a brief rest between generations
+            time.sleep(GENERATION_COOLDOWN_SECONDS)
 
     def run(self):
         """Process all pending generation requests across all channels."""
