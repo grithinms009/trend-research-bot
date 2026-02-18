@@ -24,7 +24,8 @@ KW_EXTRACTOR = yake.KeywordExtractor(lan="en", n=2, top=12, dedupLim=0.5)
 
 
 class TopicScraper:
-    MIN_ARTICLE_CHARS = 300
+    MIN_ARTICLE_CHARS = 120
+    IDEAL_ARTICLE_CHARS = 600
     SEARCH_RSS_TEMPLATE = "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
 
     def __init__(self):
@@ -51,6 +52,8 @@ class TopicScraper:
         self.metrics = {
             "topics_scraped": 0,
             "topics_with_articles": 0,
+            "topics_with_short_content": 0,
+            "topics_failed_extraction": 0,
             "topics_discarded_no_article": 0,
         }
 
@@ -84,8 +87,6 @@ class TopicScraper:
             prepared = self._prepare_topic(topic)
             if prepared:
                 validated_topics.append(prepared)
-
-        self.metrics["topics_with_articles"] = len(validated_topics)
 
         # Group and trim per channel targets
         final_topics = self._group_by_channel(validated_topics)
@@ -142,7 +143,7 @@ class TopicScraper:
         prepared.setdefault("source", "")
 
         summary = (prepared.get("summary") or "").strip()
-        article_text = (prepared.get("article_text") or "").strip()
+        article_text = (prepared.get("article_text") or prepared.get("content") or "").strip()
         published_at = prepared.get("published_at", "")
 
         if len(article_text) >= self.MIN_ARTICLE_CHARS:
@@ -152,41 +153,49 @@ class TopicScraper:
             )
         else:
             candidate_urls = self._gather_candidate_urls(prepared)
-            article_text = ""
-            chosen_url = ""
+            extracted_any = False
 
             for url, candidate_published in candidate_urls:
                 if not url:
                     continue
 
                 extracted_text, extracted_summary, extracted_published = self._extract_article(url)
-                if extracted_text and len(extracted_text) >= self.MIN_ARTICLE_CHARS:
-                    article_text = extracted_text
-                    chosen_url = url
+                if extracted_text:
+                    article_text = extracted_text.strip()
                     summary = extracted_summary or summary or prepared["title"]
                     published_at = (
                         extracted_published
                         or candidate_published
                         or published_at
                     )
-                    break
+                    extracted_any = True
+                    prepared["url"] = url
+                    if len(article_text) >= self.MIN_ARTICLE_CHARS:
+                        break
 
-            if chosen_url:
-                prepared["url"] = chosen_url
+            if not extracted_any:
+                self.metrics["topics_failed_extraction"] += 1
 
-        if not article_text or len(article_text) < self.MIN_ARTICLE_CHARS:
+        if not summary:
+            summary = prepared.get("title", "")
+
+        content_length = len(article_text or "")
+        if content_length >= self.IDEAL_ARTICLE_CHARS:
+            prepared["content_tier"] = "full"
+            self.metrics["topics_with_articles"] += 1
+        elif content_length >= self.MIN_ARTICLE_CHARS:
+            prepared["content_tier"] = "short"
+            self.metrics["topics_with_short_content"] += 1
+        else:
+            prepared["content_tier"] = "minimal"
             self.metrics["topics_discarded_no_article"] += 1
-            logger.debug(
-                "Discarded topic '%s' — unable to verify article >= %s chars",
-                prepared.get("title", "unknown"),
-                self.MIN_ARTICLE_CHARS,
-            )
-            return None
 
         prepared["article_text"] = article_text
+        prepared["content"] = article_text
         prepared["summary"] = self._shorten_summary(summary or prepared["title"])
-        prepared["keywords"] = prepared.get("keywords") or self._extract_keywords(article_text)
+        prepared["keywords"] = prepared.get("keywords") or self._extract_keywords(article_text or prepared.get("title", ""))
         prepared["published_at"] = published_at
+        prepared["has_article"] = content_length >= self.MIN_ARTICLE_CHARS
         prepared["validated_at"] = datetime.now().isoformat()
 
         return prepared

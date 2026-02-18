@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class TopicCleaner:
-    REQUIRED_FIELDS = ("article_text", "url", "summary")
+    REQUIRED_FIELDS = ("url", "summary")
 
     def __init__(self):
         self.metrics = {
@@ -52,6 +52,11 @@ class TopicCleaner:
             value = topic.get(field)
             if not value or not isinstance(value, str) or not value.strip():
                 return False
+
+        article = topic.get("article_text", "") or topic.get("content", "")
+        if len(article.strip()) < 80:
+            return False
+
         return True
 
     def _log_metrics(self):
