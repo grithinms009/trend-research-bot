@@ -1,7 +1,11 @@
 import json
 import glob
 import os
+import time
+import logging
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # ---------------- CONFIG ----------------
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -41,22 +45,28 @@ def compute_priority(cluster):
         freshness_score = max(0.0, 24 - age_hours) / 24  # 0-1 scale, more recent = higher
         score += freshness_score * FRESHNESS_WEIGHT
 
-    # Placeholder for competition scoring (if you have external data)
-    # score += cluster.get("competition_score", 0) * COMPETITION_WEIGHT
-
     return score
 
 
 if __name__ == "__main__":
+    start = time.time()
+    
     # ---------------- LOAD LATEST CLUSTERS ----------------
     files = sorted(glob.glob(f"{CLUSTER_DIR}/*.json"))
     if not files:
-        print("No clusters found. Run topic_cluster.py first.")
+        print("ERROR: No clusters found. Run topic_cluster.py first.")
         exit(1)
 
     latest_file = files[-1]
+    print(f"Reading clusters from: {latest_file}")
     with open(latest_file) as f:
         clusters = json.load(f)
+
+    print(f"Loaded {len(clusters)} clusters")
+
+    # Count total topics across clusters
+    total_topics = sum(len(c.get("topics", [])) for c in clusters)
+    print(f"Total topics in clusters: {total_topics}")
 
     # ---------------- COMPUTE PRIORITIES ----------------
     for c in clusters:
@@ -70,4 +80,16 @@ if __name__ == "__main__":
     with open(outfile, "w") as f:
         json.dump(clusters_sorted, f, indent=2)
 
-    print("topic queue saved:", outfile)
+    duration = round(time.time() - start, 2)
+
+    print(f"\n--- Prioritizer Results ---")
+    for i, c in enumerate(clusters_sorted):
+        print(
+            f"  #{i+1}: {c.get('id', 'unknown')} — "
+            f"priority={c['priority_score']:.3f}, "
+            f"size={c.get('size', 0)}, "
+            f"trend={c.get('trend_score', 0):.2f}"
+        )
+    print(f"\nTopic queue saved to: {outfile} (completed in {duration}s)")
+    print(f"Total topics queued: {total_topics}")
+    print("--------------------------\n")

@@ -2,20 +2,27 @@ import os
 import json
 import glob
 import logging
+import statistics
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+MIN_ARTICLE_CHARS = 300
+
 
 class TopicCleaner:
-    REQUIRED_FIELDS = ("url", "summary")
+    REQUIRED_FIELDS = ("title",)  # url checked separately; summary can be derived from title
 
     def __init__(self):
         self.metrics = {
             "topics_received": 0,
             "topics_retained": 0,
-            "topics_dropped_missing_content": 0,
+            "topics_dropped_no_title": 0,
+            "topics_dropped_no_url": 0,
+            "topics_dropped_short_article": 0,
+            "topics_dropped_duplicate": 0,
         }
+        self.article_lengths: list = []
 
     def clean(self, topics):
         print("Cleaning topics...")
@@ -24,45 +31,64 @@ class TopicCleaner:
 
         for topic in topics or []:
             self.metrics["topics_received"] += 1
-            if not self._is_valid(topic):
-                self.metrics["topics_dropped_missing_content"] += 1
+            title = (topic.get("title") or "").strip()
+            url = (topic.get("url") or topic.get("source_url") or "").strip()
+            article_text = (topic.get("article_text") or topic.get("content") or "").strip()
+
+            # Track article lengths for distribution logging
+            self.article_lengths.append(len(article_text))
+
+            # Validation gate 1: title must exist
+            if not title:
+                self.metrics["topics_dropped_no_title"] += 1
+                logger.warning("Cleaner dropped topic — missing title")
+                continue
+
+            # Validation gate 2: URL must exist
+            if not url:
+                self.metrics["topics_dropped_no_url"] += 1
+                logger.warning("Cleaner dropped topic '%s' — missing URL", title[:60])
+                continue
+
+            # Validation gate 3: article_text >= 300 chars
+            if len(article_text) < MIN_ARTICLE_CHARS:
+                self.metrics["topics_dropped_short_article"] += 1
                 logger.warning(
-                    "Cleaner dropped topic '%s' — missing article_text/url/summary",
-                    topic.get("title", "unknown"),
+                    "Cleaner dropped topic '%s' — article_text only %d chars (min %d)",
+                    title[:60], len(article_text), MIN_ARTICLE_CHARS,
                 )
                 continue
 
-            title = topic.get("title")
-            if title in seen_titles:
+            # Validation gate 4: deduplication
+            title_key = title.lower()
+            if title_key in seen_titles:
+                self.metrics["topics_dropped_duplicate"] += 1
                 continue
 
             topic["cleaned_at"] = datetime.now().isoformat()
             cleaned.append(topic)
-            seen_titles.add(title)
+            seen_titles.add(title_key)
 
         self.metrics["topics_retained"] = len(cleaned)
         self._log_metrics()
         return cleaned
 
-    def _is_valid(self, topic):
-        if not isinstance(topic, dict):
-            return False
-
-        for field in self.REQUIRED_FIELDS:
-            value = topic.get(field)
-            if not value or not isinstance(value, str) or not value.strip():
-                return False
-
-        article = topic.get("article_text", "") or topic.get("content", "")
-        if len(article.strip()) < 80:
-            return False
-
-        return True
-
     def _log_metrics(self):
         print("\n--- Cleaner Metrics ---")
         for key, value in self.metrics.items():
             print(f"{key}: {value}")
+
+        # Article length distribution
+        if self.article_lengths:
+            print(f"\n--- Article Length Distribution ---")
+            print(f"  total_articles: {len(self.article_lengths)}")
+            print(f"  min_length: {min(self.article_lengths)}")
+            print(f"  max_length: {max(self.article_lengths)}")
+            print(f"  average_length: {statistics.mean(self.article_lengths):.0f}")
+            print(f"  median_length: {statistics.median(self.article_lengths):.0f}")
+            above_threshold = sum(1 for l in self.article_lengths if l >= MIN_ARTICLE_CHARS)
+            print(f"  above_{MIN_ARTICLE_CHARS}_chars: {above_threshold}/{len(self.article_lengths)}")
+
         print("----------------------\n")
 
 if __name__ == "__main__":
@@ -79,13 +105,19 @@ if __name__ == "__main__":
         exit(0)
         
     latest_file = files[-1]
+    print(f"Reading topics from: {latest_file}")
     with open(latest_file) as f:
         topics = json.load(f)
-        
+    
+    print(f"Loaded {len(topics)} topics")
+    
     cleaner = TopicCleaner()
     cleaned_topics = cleaner.clean(topics)
+    
+    if not cleaned_topics:
+        print("WARNING: Cleaner produced 0 topics! Check article extraction.")
     
     outfile = os.path.join(CLEAN_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M')}.json")
     with open(outfile, "w") as f:
         json.dump(cleaned_topics, f, indent=2)
-    print(f"Cleaned topics saved to: {outfile}")
+    print(f"Cleaned topics saved to: {outfile} ({len(cleaned_topics)} topics)")

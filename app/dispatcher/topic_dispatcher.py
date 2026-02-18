@@ -6,9 +6,11 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+MIN_ARTICLE_CHARS = 300
+
 
 class TopicDispatcher:
-    REQUIRED_FIELDS = ("url", "summary")
+    """Reads prioritized topics from topic_queue/ and dispatches to channel-specific generation queues."""
 
     def __init__(self):
         # Load channel configuration
@@ -26,9 +28,12 @@ class TopicDispatcher:
 
         self.channel_config = channels
         self.metrics = {
+            "input_count": 0,
             "topics_received": 0,
             "topics_dispatched": 0,
             "topics_skipped_invalid": 0,
+            "topics_skipped_no_channel": 0,
+            "failure_reasons": [],
         }
         self.logger = logging.getLogger(__name__)
 
@@ -44,15 +49,24 @@ class TopicDispatcher:
         for topic in topics or []:
             self.metrics["topics_received"] += 1
             cid = topic.get("channel")
+            
             if cid not in self.channel_config:
+                self.metrics["topics_skipped_no_channel"] += 1
+                self.logger.warning(
+                    "Dispatcher skipped topic '%s' — channel '%s' not in config",
+                    topic.get("title", "unknown")[:60], cid,
+                )
+                self.metrics["failure_reasons"].append(f"unknown_channel:{cid}")
                 continue
 
             if not self._is_valid(topic):
                 self.metrics["topics_skipped_invalid"] += 1
+                reason = self._get_invalid_reason(topic)
                 self.logger.warning(
-                    "Dispatcher skipped topic '%s' — insufficient article content",
-                    topic.get("title", "unknown"),
+                    "Dispatcher skipped topic '%s' — %s",
+                    topic.get("title", "unknown")[:60], reason,
                 )
+                self.metrics["failure_reasons"].append(reason)
                 continue
 
             channel_dir = os.path.join(generated_base, cid)
@@ -87,43 +101,93 @@ class TopicDispatcher:
         if not isinstance(topic, dict):
             return False
 
-        for field in self.REQUIRED_FIELDS:
-            value = topic.get(field)
-            if not value or not isinstance(value, str) or not value.strip():
-                return False
+        title = (topic.get("title") or "").strip()
+        if not title:
+            return False
 
-        article = topic.get("article_text", "") or topic.get("content", "")
-        if len(article.strip()) < 80:
+        url = (topic.get("url") or "").strip()
+        if not url:
+            return False
+
+        article = (topic.get("article_text") or topic.get("content") or "").strip()
+        if len(article) < MIN_ARTICLE_CHARS:
             return False
 
         return True
 
+    def _get_invalid_reason(self, topic):
+        """Return a human-readable reason why a topic is invalid."""
+        if not isinstance(topic, dict):
+            return "not_a_dict"
+        if not (topic.get("title") or "").strip():
+            return "missing_title"
+        if not (topic.get("url") or "").strip():
+            return "missing_url"
+        article = (topic.get("article_text") or topic.get("content") or "").strip()
+        if len(article) < MIN_ARTICLE_CHARS:
+            return f"short_article:{len(article)}_chars"
+        return "unknown"
+
     def _log_metrics(self):
         print("\n--- Dispatcher Metrics ---")
         for key, value in self.metrics.items():
-            print(f"{key}: {value}")
+            if key == "failure_reasons":
+                if value:
+                    # Summarize failure reasons
+                    from collections import Counter
+                    reason_counts = Counter(value)
+                    print(f"failure_reasons:")
+                    for reason, count in reason_counts.most_common():
+                        print(f"  {reason}: {count}")
+            else:
+                print(f"{key}: {value}")
         print("-------------------------\n")
 
 
 if __name__ == "__main__":
+    import time
+    start = time.time()
+    
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    # Check for latest analyzed topics file
-    TOPICS_DIR = os.path.join(BASE_DIR, "data", "topics_analyzed")
-    files = sorted(glob.glob(f"{TOPICS_DIR}/*.json"))
+    
+    # ✅ FIXED: Read from topic_queue/ (output of prioritizer), NOT topics_analyzed/
+    QUEUE_DIR = os.path.join(BASE_DIR, "data", "topic_queue")
+    files = sorted(glob.glob(f"{QUEUE_DIR}/*.json"))
     
     if not files:
-        print("No topics found to dispatch.")
-        exit(0)
+        print("ERROR: No prioritized topics found in topic_queue/. Run topic_prioritizer.py first.")
+        exit(1)
         
     latest_file = files[-1]
-    print(f"Reading topics from: {latest_file}")
+    print(f"Reading prioritized topics from: {latest_file}")
     with open(latest_file) as f:
-        topics = json.load(f)
+        clusters = json.load(f)
+    
+    # Flatten clusters → individual topics
+    all_topics = []
+    if isinstance(clusters, list):
+        for item in clusters:
+            if isinstance(item, dict) and "topics" in item:
+                # Cluster format: {"id": ..., "topics": [...]}
+                all_topics.extend(item.get("topics", []))
+            elif isinstance(item, dict) and "title" in item:
+                # Already a flat topic
+                all_topics.append(item)
+    
+    print(f"Total topics extracted from queue: {len(all_topics)}")
     
     dispatcher = TopicDispatcher()
-    stats = dispatcher.dispatch_by_channel(topics)
+    dispatcher.metrics["input_count"] = len(all_topics)
+    stats = dispatcher.dispatch_by_channel(all_topics)
     
-    print("\n--- Dispatch Stats ---")
+    duration = round(time.time() - start, 2)
+    
+    print(f"\n--- Dispatch Stats (completed in {duration}s) ---")
     for cid, count in stats.items():
         print(f"Channel {cid}: {count} topics queued")
+    total = sum(stats.values())
+    print(f"Total dispatched: {total}")
     print("----------------------\n")
+
+    if total == 0:
+        print("WARNING: 0 topics dispatched! Check if topics have valid channels and article text.")

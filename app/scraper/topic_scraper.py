@@ -7,7 +7,9 @@ from typing import Any, List, Tuple
 from urllib.parse import quote_plus
 
 import feedparser
+import requests as http_requests
 import yake
+from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
 from newspaper import Article
 
@@ -24,7 +26,7 @@ KW_EXTRACTOR = yake.KeywordExtractor(lan="en", n=2, top=12, dedupLim=0.5)
 
 
 class TopicScraper:
-    MIN_ARTICLE_CHARS = 120
+    MIN_ARTICLE_CHARS = 300
     IDEAL_ARTICLE_CHARS = 600
     SEARCH_RSS_TEMPLATE = "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
 
@@ -86,7 +88,18 @@ class TopicScraper:
         for topic in ranked_topics:
             prepared = self._prepare_topic(topic)
             if prepared:
-                validated_topics.append(prepared)
+                # Hard gate: only keep topics with sufficient article text
+                article_len = len((prepared.get("article_text") or "").strip())
+                if article_len >= self.MIN_ARTICLE_CHARS:
+                    validated_topics.append(prepared)
+                else:
+                    self.metrics["topics_discarded_no_article"] += 1
+                    logger.info(
+                        "Discarded topic '%s' — article_text only %d chars (min %d)",
+                        prepared.get("title", "unknown"), article_len, self.MIN_ARTICLE_CHARS,
+                    )
+
+        print(f"Topics with valid articles (>={self.MIN_ARTICLE_CHARS} chars): {len(validated_topics)}")
 
         # Group and trim per channel targets
         final_topics = self._group_by_channel(validated_topics)
@@ -242,10 +255,12 @@ class TopicScraper:
         return results
 
     def _extract_article(self, url: str):
+        """Multi-tier extraction: newspaper3k → trafilatura → BS4 paragraphs."""
         article_text = ""
         summary = ""
         published_at = ""
 
+        # Tier 1: newspaper3k
         try:
             article = Article(url)
             article.download()
@@ -257,10 +272,11 @@ class TopicScraper:
                 article.nlp()
                 summary = (article.summary or "").strip()
             except Exception:
-                summary = summary
+                pass
         except Exception as exc:
-            logger.debug(f"Primary article extraction failed for {url}: {exc}")
+            logger.debug("newspaper3k failed for %s: %s", url, exc)
 
+        # Tier 2: trafilatura
         if len(article_text) < self.MIN_ARTICLE_CHARS and trafilatura:
             try:
                 downloaded = trafilatura.fetch_url(url)
@@ -268,7 +284,27 @@ class TopicScraper:
                 if extracted and len(extracted) > len(article_text):
                     article_text = extracted.strip()
             except Exception as exc:
-                logger.debug(f"Trafilatura extraction failed for {url}: {exc}")
+                logger.debug("trafilatura failed for %s: %s", url, exc)
+
+        # Tier 3: requests + BeautifulSoup paragraph aggregation
+        if len(article_text) < self.MIN_ARTICLE_CHARS:
+            try:
+                resp = http_requests.get(
+                    url,
+                    timeout=15,
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; TrendBot/1.0)"},
+                )
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.text, "html.parser")
+                for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+                    tag.decompose()
+                paragraphs = soup.find_all("p")
+                p_texts = [p.get_text(strip=True) for p in paragraphs if len(p.get_text(strip=True)) > 40]
+                bs_text = "\n\n".join(p_texts)
+                if len(bs_text) > len(article_text):
+                    article_text = bs_text.strip()
+            except Exception as exc:
+                logger.debug("BS4 paragraph extraction failed for %s: %s", url, exc)
 
         return article_text, summary, published_at
 
