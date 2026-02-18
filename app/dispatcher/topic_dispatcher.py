@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 class TopicDispatcher:
-    REQUIRED_FIELDS = ("article_text", "summary", "url")
+    REQUIRED_FIELDS = ("url", "summary")
 
     def __init__(self):
         # Load channel configuration
@@ -50,7 +50,7 @@ class TopicDispatcher:
             if not self._is_valid(topic):
                 self.metrics["topics_skipped_invalid"] += 1
                 self.logger.warning(
-                    "Dispatcher skipped topic '%s' — missing article_text/url/summary",
+                    "Dispatcher skipped topic '%s' — insufficient article content",
                     topic.get("title", "unknown"),
                 )
                 continue
@@ -91,6 +91,11 @@ class TopicDispatcher:
             value = topic.get(field)
             if not value or not isinstance(value, str) or not value.strip():
                 return False
+
+        article = topic.get("article_text", "") or topic.get("content", "")
+        if len(article.strip()) < 80:
+            return False
+
         return True
 
     def _log_metrics(self):
@@ -102,8 +107,8 @@ class TopicDispatcher:
 
 if __name__ == "__main__":
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    # Check for latest topics file
-    TOPICS_DIR = os.path.join(BASE_DIR, "data", "topics")
+    # Check for latest analyzed topics file
+    TOPICS_DIR = os.path.join(BASE_DIR, "data", "topics_analyzed")
     files = sorted(glob.glob(f"{TOPICS_DIR}/*.json"))
     
     if not files:

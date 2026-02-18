@@ -2,26 +2,56 @@ import os
 import json
 import glob
 from datetime import datetime
+from typing import List, Dict, Any
+
+from sklearn.cluster import KMeans
+from sklearn.feature_extraction.text import TfidfVectorizer
+
 
 class TopicCluster:
     def __init__(self):
-        pass
+        self.vectorizer = TfidfVectorizer(stop_words="english")
 
-    def cluster(self, topics):
+    def cluster(self, topics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         print("Clustering topics...")
-        # Simple clustering: group by source for now, or just make one big cluster for testing
-        clusters = []
-        
-        # Create a dummy cluster with all topics
-        cluster = {
-            "id": "cluster_001",
-            "keywords": ["general", "news"],
-            "trend_score": sum(t.get("score", 1.0) for t in topics) / max(1, len(topics)) * 10,
-            "size": len(topics),
-            "topics": topics
-        }
-        clusters.append(cluster)
-        return clusters
+        titles = [t.get("title", "") for t in topics if t.get("title")]
+        clusters: Dict[int, List[Dict[str, Any]]] = {}
+        orphans: List[Dict[str, Any]] = []
+
+        if titles:
+            matrix = self.vectorizer.fit_transform(titles)
+
+            k = min(5, max(1, len(titles) // 3))
+            model = KMeans(n_clusters=k, n_init=10)
+            labels = model.fit_predict(matrix)
+
+            title_idx = 0
+            for topic in topics:
+                if not topic.get("title"):
+                    orphans.append(topic)
+                    continue
+                label = int(labels[title_idx])
+                clusters.setdefault(label, []).append(topic)
+                title_idx += 1
+        else:
+            orphans = topics[:]
+
+        if orphans:
+            clusters.setdefault(-1, []).extend(orphans)
+
+        results: List[Dict[str, Any]] = []
+        for label, grouped in clusters.items():
+            trend_score = sum(t.get("score", 1.0) for t in grouped)
+            cluster_id = "cluster_orphan" if label == -1 else f"cluster_{label}"
+            results.append({
+                "id": cluster_id,
+                "keywords": [],
+                "trend_score": trend_score,
+                "size": len(grouped),
+                "topics": grouped,
+            })
+
+        return results
 
 if __name__ == "__main__":
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
