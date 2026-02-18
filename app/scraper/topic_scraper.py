@@ -142,27 +142,37 @@ class TopicScraper:
         prepared.setdefault("source", "")
 
         summary = (prepared.get("summary") or "").strip()
+        article_text = (prepared.get("article_text") or "").strip()
         published_at = prepared.get("published_at", "")
 
-        candidate_urls = self._gather_candidate_urls(prepared)
-        article_text = ""
-        chosen_url = ""
+        if len(article_text) >= self.MIN_ARTICLE_CHARS:
+            logger.debug(
+                "Topic '%s' retained existing article from collector",
+                prepared.get("title", "unknown"),
+            )
+        else:
+            candidate_urls = self._gather_candidate_urls(prepared)
+            article_text = ""
+            chosen_url = ""
 
-        for url, candidate_published in candidate_urls:
-            if not url:
-                continue
+            for url, candidate_published in candidate_urls:
+                if not url:
+                    continue
 
-            extracted_text, extracted_summary, extracted_published = self._extract_article(url)
-            if extracted_text and len(extracted_text) >= self.MIN_ARTICLE_CHARS:
-                article_text = extracted_text
-                chosen_url = url
-                summary = extracted_summary or summary or prepared["title"]
-                published_at = (
-                    extracted_published
-                    or candidate_published
-                    or published_at
-                )
-                break
+                extracted_text, extracted_summary, extracted_published = self._extract_article(url)
+                if extracted_text and len(extracted_text) >= self.MIN_ARTICLE_CHARS:
+                    article_text = extracted_text
+                    chosen_url = url
+                    summary = extracted_summary or summary or prepared["title"]
+                    published_at = (
+                        extracted_published
+                        or candidate_published
+                        or published_at
+                    )
+                    break
+
+            if chosen_url:
+                prepared["url"] = chosen_url
 
         if not article_text or len(article_text) < self.MIN_ARTICLE_CHARS:
             self.metrics["topics_discarded_no_article"] += 1
@@ -173,7 +183,6 @@ class TopicScraper:
             )
             return None
 
-        prepared["url"] = chosen_url or prepared.get("url", "")
         prepared["article_text"] = article_text
         prepared["summary"] = self._shorten_summary(summary or prepared["title"])
         prepared["keywords"] = prepared.get("keywords") or self._extract_keywords(article_text)
