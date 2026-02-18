@@ -2,16 +2,35 @@ import os
 import json
 import yaml
 import glob
+import logging
 from datetime import datetime
 from pathlib import Path
 
+
 class TopicDispatcher:
+    REQUIRED_FIELDS = ("article_text", "summary", "url")
+
     def __init__(self):
         # Load channel configuration
         base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         config_path = os.path.join(base_path, "app", "config", "channels.yaml")
         with open(config_path, "r") as f:
-            self.channel_config = yaml.safe_load(f)["channels"]
+            config_data = yaml.safe_load(f) or {}
+
+        if not isinstance(config_data, dict):
+            raise ValueError("channels.yaml must contain a mapping at the root level")
+
+        channels = config_data.get("channels")
+        if not isinstance(channels, dict) or not channels:
+            raise ValueError("Channel configuration missing 'channels' section in channels.yaml")
+
+        self.channel_config = channels
+        self.metrics = {
+            "topics_received": 0,
+            "topics_dispatched": 0,
+            "topics_skipped_invalid": 0,
+        }
+        self.logger = logging.getLogger(__name__)
 
     def dispatch_by_channel(self, topics):
         """
@@ -22,11 +41,20 @@ class TopicDispatcher:
         
         counts = {cid: 0 for cid in self.channel_config.keys()}
         
-        for topic in topics:
+        for topic in topics or []:
+            self.metrics["topics_received"] += 1
             cid = topic.get("channel")
             if cid not in self.channel_config:
                 continue
-                
+
+            if not self._is_valid(topic):
+                self.metrics["topics_skipped_invalid"] += 1
+                self.logger.warning(
+                    "Dispatcher skipped topic '%s' — missing article_text/url/summary",
+                    topic.get("title", "unknown"),
+                )
+                continue
+
             channel_dir = os.path.join(generated_base, cid)
             os.makedirs(channel_dir, exist_ok=True)
             
@@ -48,10 +76,29 @@ class TopicDispatcher:
             
             with open(filepath, "w") as f:
                 json.dump(request, f, indent=2)
-            
+
             counts[cid] += 1
-            
+            self.metrics["topics_dispatched"] += 1
+
+        self._log_metrics()
         return counts
+
+    def _is_valid(self, topic):
+        if not isinstance(topic, dict):
+            return False
+
+        for field in self.REQUIRED_FIELDS:
+            value = topic.get(field)
+            if not value or not isinstance(value, str) or not value.strip():
+                return False
+        return True
+
+    def _log_metrics(self):
+        print("\n--- Dispatcher Metrics ---")
+        for key, value in self.metrics.items():
+            print(f"{key}: {value}")
+        print("-------------------------\n")
+
 
 if __name__ == "__main__":
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

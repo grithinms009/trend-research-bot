@@ -1,23 +1,64 @@
 import os
 import json
 import glob
+import logging
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
+
+
 class TopicCleaner:
+    REQUIRED_FIELDS = ("article_text", "url", "summary")
+
     def __init__(self):
-        pass
+        self.metrics = {
+            "topics_received": 0,
+            "topics_retained": 0,
+            "topics_dropped_missing_content": 0,
+        }
 
     def clean(self, topics):
         print("Cleaning topics...")
-        # Placeholder: deduplicate or format
         cleaned = []
         seen_titles = set()
-        for t in topics:
-            if t["title"] not in seen_titles:
-                t["cleaned_at"] = datetime.now().isoformat()
-                cleaned.append(t)
-                seen_titles.add(t["title"])
+
+        for topic in topics or []:
+            self.metrics["topics_received"] += 1
+            if not self._is_valid(topic):
+                self.metrics["topics_dropped_missing_content"] += 1
+                logger.warning(
+                    "Cleaner dropped topic '%s' — missing article_text/url/summary",
+                    topic.get("title", "unknown"),
+                )
+                continue
+
+            title = topic.get("title")
+            if title in seen_titles:
+                continue
+
+            topic["cleaned_at"] = datetime.now().isoformat()
+            cleaned.append(topic)
+            seen_titles.add(title)
+
+        self.metrics["topics_retained"] = len(cleaned)
+        self._log_metrics()
         return cleaned
+
+    def _is_valid(self, topic):
+        if not isinstance(topic, dict):
+            return False
+
+        for field in self.REQUIRED_FIELDS:
+            value = topic.get(field)
+            if not value or not isinstance(value, str) or not value.strip():
+                return False
+        return True
+
+    def _log_metrics(self):
+        print("\n--- Cleaner Metrics ---")
+        for key, value in self.metrics.items():
+            print(f"{key}: {value}")
+        print("----------------------\n")
 
 if __name__ == "__main__":
     # Determine paths

@@ -1,6 +1,6 @@
 models:
-  C1: "llama3"
-  C2: "mistral:instruct"
-  C3: "phi3:mini"
-  C4: "llama3"
-  C5: "mistral:instruct"
+  C1: "mistral:latest"
+  C2: "mistral:latest"
+  C3: "mistral:latest"
+  C4: "mistral:latest"
+  C5: "mistral:latest"

@@ -10,8 +10,13 @@ class OllamaClient:
     Local LLM client using Ollama CLI.
     """
 
-    @staticmethod
-    def generate(prompt: str, model: str = "mistral:instruct", timeout: int = 120) -> Optional[str]:
+    ALLOWED_MODELS = {
+        "mistral:latest",
+        "deepseek-r1:7b",
+    }
+
+    @classmethod
+    def generate(cls, prompt: str, model: str = "mistral:latest", timeout: int = 120) -> Optional[str]:
         """
         Generate text using Ollama 'run' command.
         
@@ -24,7 +29,11 @@ class OllamaClient:
             Cleaned response text or None if failed.
         """
         start_time = time.time()
-        
+
+        if model not in cls.ALLOWED_MODELS:
+            logger.error(f"Model '{model}' is not allowed.")
+            return None
+
         # We use 'ollama run' via subprocess.
         # Note: --nowarn is used to suppress some CLI warnings if supported by the version.
         # We pass the prompt via stdin to avoid shell escaping issues with long prompts.
@@ -59,7 +68,7 @@ class OllamaClient:
             return None
 
     @classmethod
-    def generate_with_retry(cls, prompt: str, model: str = "mistral:instruct", timeout: int = 120, retries: int = 1) -> Optional[str]:
+    def generate_with_retry(cls, prompt: str, model: str = "mistral:latest", timeout: int = 120, retries: int = 1) -> Optional[str]:
         """Generate with a simple retry mechanism."""
         for attempt in range(retries + 1):
             response = cls.generate(prompt, model, timeout)

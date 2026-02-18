@@ -24,6 +24,10 @@ class TopicScriptGenerator:
             raise ValueError("Channel configuration missing 'channels' section in channels.yaml")
 
         self.channel_config = channels
+        self.metrics = {
+            "topics_generated": 0,
+            "topics_skipped_no_content": 0,
+        }
             
         self.prompts = {
             "C1": "You are a tech news reporter. Write a high-energy, breaking news style short-form video script about: {title}. Focus on the technical impact and why it matters now. Keep it under 60 seconds.",
@@ -38,25 +42,56 @@ class TopicScriptGenerator:
         topic = request.get("topic", {})
         title = topic.get("title", "Unknown Topic")
         summary = topic.get("summary", "")
-        model = request.get("model", "mistral:instruct")
+        model = request.get("model", "mistral:latest")
         tone = request.get("tone", "neutral")
-        
+        article_text = (topic.get("article_text", "") or "").strip()
+        summary = (topic.get("summary", "") or "").strip()
+        url = topic.get("url", "")
+
+        if not article_text:
+            self.metrics["topics_skipped_no_content"] += 1
+            logger.warning("Skipped topic '%s' — insufficient source content", title)
+            return None
+
         print(f"Generating {tone} script for {cid} using {model}...")
-        
+
         base_prompt = self.prompts.get(cid, "Write a short-form video script about: {title}")
-        full_prompt = f"{base_prompt.format(title=title)}\n\nContext: {summary}\n\nOutput only the script text."
-        
+        instruction_block = (
+            "Using ONLY the verified article information below, generate a short-form script.\n"
+            "Do NOT invent facts.\n"
+            "If the information is insufficient, return: SKIP.\n\n"
+            f"TITLE: {title}\n"
+            f"ARTICLE SUMMARY: {summary or title}\n"
+            f"ARTICLE SOURCE: {url or 'unknown'}\n"
+            "ARTICLE TEXT:\n"
+            f"{article_text}\n"
+        )
+
+        full_prompt = (
+            f"{base_prompt.format(title=title)}\n\n"
+            f"{instruction_block}"
+            "Output only the script text."
+        )
+
         script_text = OllamaClient.generate_with_retry(
             full_prompt, 
             model=model,
             timeout=120,
             retries=1
         )
-        
+
         if not script_text:
             logger.error(f"Failed to generate script for {title}")
             return None
-            
+        
+        cleaned_output = script_text.strip()
+        if cleaned_output.upper().startswith("SKIP"):
+            self.metrics["topics_skipped_no_content"] += 1
+            logger.warning("Model skipped topic '%s' due to insufficient information", title)
+            return None
+
+        self.metrics["topics_generated"] += 1
+
         script = {
             "channel_id": cid,
             "title": title,
@@ -66,6 +101,12 @@ class TopicScriptGenerator:
             "source_topic": topic
         }
         return script
+
+    def log_metrics(self):
+        print("\n--- Script Generator Metrics ---")
+        for key, value in self.metrics.items():
+            print(f"{key}: {value}")
+        print("--------------------------------\n")
 
 if __name__ == "__main__":
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
