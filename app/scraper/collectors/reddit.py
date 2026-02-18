@@ -49,6 +49,14 @@ class RedditCollector(BaseCollector):
                 except Exception:
                     published_at = entry.published
 
+            summary_html = getattr(entry, "summary", "") or getattr(entry, "description", "")
+            if not summary_html:
+                content_list = getattr(entry, "content", [])
+                if content_list:
+                    summary_html = "\n".join(
+                        c.value for c in content_list if hasattr(c, "value") and c.value
+                    )
+
             raw = {
                 "title": entry.title,
                 "url": entry.link,
@@ -56,6 +64,7 @@ class RedditCollector(BaseCollector):
                 "score": 1.2,
                 "rank": i + 1,
                 "published_at": published_at,
+                "summary_html": summary_html,
             }
 
             enriched = self.enrich_topic(raw)
