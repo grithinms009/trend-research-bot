@@ -1,14 +1,18 @@
 import json
 import glob
+import logging
 import os
 from datetime import datetime
 from typing import List, Dict
 
-MIN_ARTICLE_LENGTH = 200
+logger = logging.getLogger(__name__)
+
+MIN_ARTICLE_LENGTH = 400
 BANNED_PATTERNS = [
     "accept all",
     "reject all",
     "privacytools",
+    "g.co/privacytools",
     "cookies and data",
 ]
 
@@ -31,10 +35,20 @@ class TopicContentValidator:
 
             if len(lower_article) < MIN_ARTICLE_LENGTH:
                 self.metrics["topics_rejected_short"] += 1
+                logger.warning(
+                    "Validator dropped topic '%s' — article_text only %d chars (min %d)",
+                    (topic.get("title") or "unknown")[:80],
+                    len(lower_article),
+                    MIN_ARTICLE_LENGTH,
+                )
                 continue
 
             if any(pattern in lower_article for pattern in BANNED_PATTERNS):
                 self.metrics["topics_rejected_banned"] += 1
+                logger.warning(
+                    "Validator dropped topic '%s' — banned pattern detected",
+                    (topic.get("title") or "unknown")[:80],
+                )
                 continue
 
             valid.append(topic)

@@ -11,10 +11,8 @@ from app.services.ollama_client import OllamaClient
 logger = logging.getLogger(__name__)
 
 MIN_ARTICLE_CHARS = 300
-MIN_SCRIPT_WORDS = 100
-MAX_SCRIPT_WORDS = 200
 TARGET_MIN_WORDS = 120
-TARGET_MAX_WORDS = 160
+TARGET_MAX_WORDS = 180
 
 # Speculation phrases that indicate hallucination
 SPECULATION_PHRASES = [
@@ -157,16 +155,19 @@ class TopicScriptGenerator:
         
         # 1. Word count check
         word_count = len(cleaned_output.split())
-        if word_count < MIN_SCRIPT_WORDS or word_count > MAX_SCRIPT_WORDS:
+        if word_count < TARGET_MIN_WORDS:
+            self.metrics["topics_rejected_word_count"] += 1
+            logger.error(
+                "REJECTED: Script for '%s' too short — %d words (min %d)",
+                title[:60], word_count, TARGET_MIN_WORDS,
+            )
+            return None
+
+        if word_count > TARGET_MAX_WORDS:
             logger.warning(
-                "Script for '%s' has %d words (target %d-%d) — allowing with warning",
+                "Script for '%s' has %d words (target %d-%d) — allowing but flagged",
                 title[:60], word_count, TARGET_MIN_WORDS, TARGET_MAX_WORDS,
             )
-            # Still allow but log; only hard-reject extreme cases
-            if word_count < 50 or word_count > 300:
-                self.metrics["topics_rejected_word_count"] += 1
-                logger.error("REJECTED: Script for '%s' has extreme word count: %d", title[:60], word_count)
-                return None
 
         # 2. Hallucination check — reject speculation not from article
         lower_output = cleaned_output.lower()
