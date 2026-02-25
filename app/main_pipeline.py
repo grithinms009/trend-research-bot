@@ -33,7 +33,9 @@ PIPELINE = [
     "app.analyzer.topic_prioritizer",
     "app.dispatcher.topic_dispatcher",
     "app.workers.topic_generator_worker",
-    "app.workers.topic_script_generator"
+    "app.workers.topic_script_generator",
+    "app.workers.scene_planner",
+    "app.workers.voice_generator",
 ]
 
 # Stage-to-data mapping for metrics collection
@@ -47,6 +49,8 @@ STAGE_DATA_DIRS = {
     "app.dispatcher.topic_dispatcher": ("data/topic_generated", "dispatched"),
     "app.workers.topic_generator_worker": ("data/topic_scripts", "generated"),
     "app.workers.topic_script_generator": ("data/topic_scripts", "generated"),
+    "app.workers.scene_planner": ("data/scene_plans", "scene_planned"),
+    "app.workers.voice_generator": ("data/audio", "audio"),
 }
 
 stage_metrics = {}
@@ -77,22 +81,33 @@ def count_items_in_latest_json(data_dir_rel):
         except Exception:
             return 0
 
-    # Check subdirectories (for dispatched/generated)
-    subdirs = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
+    # Check subdirectories (for dispatched/generated/audio)
     total = 0
-    for subdir in subdirs:
-        subdir_path = os.path.join(data_dir, subdir)
-        json_files = glob.glob(f"{subdir_path}/*.json")
-        for jf in json_files:
-            try:
-                with open(jf) as f:
-                    data = json.load(f)
-                if isinstance(data, list):
-                    total += len(data)
-                else:
-                    total += 1
-            except Exception:
-                total += 1
+    for entry in os.listdir(data_dir):
+        entry_path = os.path.join(data_dir, entry)
+        if os.path.isdir(entry_path):
+            json_files = glob.glob(f"{entry_path}/*.json")
+            if json_files:
+                for jf in json_files:
+                    try:
+                        with open(jf) as f:
+                            data = json.load(f)
+                        if isinstance(data, list):
+                            total += len(data)
+                        else:
+                            total += 1
+                    except Exception:
+                        total += 1
+            else:
+                # Count non-JSON files (e.g., mp3 audio assets)
+                files_in_dir = [
+                    f
+                    for f in os.listdir(entry_path)
+                    if os.path.isfile(os.path.join(entry_path, f))
+                ]
+                total += len(files_in_dir)
+        elif entry.endswith(".mp3"):
+            total += 1
     return total
 
 
@@ -179,6 +194,8 @@ def print_health_report():
     queued = count_items_in_latest_json("data/topic_queue")
     dispatched = count_items_in_latest_json("data/topic_generated")
     generated = count_items_in_latest_json("data/topic_scripts")
+    scene_plans = count_items_in_latest_json("data/scene_plans")
+    audio_clips = count_items_in_latest_json("data/audio")
 
     print(f"\n  📊 Stage Results:")
     print(f"  {'─' * 40}")
@@ -190,17 +207,23 @@ def print_health_report():
     print(f"  Queued (prioritized):    {queued}")
     print(f"  Dispatched:              {dispatched}")
     print(f"  Scripts Generated:       {generated}")
+    print(f"  Scene Plans:             {scene_plans}")
+    print(f"  Audio Clips:             {audio_clips}")
 
     # Success rate
     if scraped > 0:
         clean_rate = (cleaned / scraped) * 100
         validated_rate = (validated / cleaned) * 100 if cleaned > 0 else 0
         gen_rate = (generated / scraped) * 100 if generated > 0 else 0
+        scene_rate = (scene_plans / max(generated, 1)) * 100 if generated > 0 else 0
+        audio_rate = (audio_clips / max(scene_plans, 1)) * 100 if scene_plans > 0 else 0
         print(f"\n  📈 Success Rates:")
         print(f"  {'─' * 40}")
         print(f"  Extraction → Clean:     {clean_rate:.1f}%")
         print(f"  Clean → Validated:      {validated_rate:.1f}%")
         print(f"  End-to-End (→ Script):   {gen_rate:.1f}%")
+        print(f"  Script → Scenes:         {scene_rate:.1f}%")
+        print(f"  Scenes → Audio:          {audio_rate:.1f}%")
 
     # Per-stage timing
     print(f"\n  ⏱  Stage Timings:")
