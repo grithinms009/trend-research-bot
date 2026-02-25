@@ -18,6 +18,7 @@ try:  # Optional dependency for content extraction fallbacks
 except ImportError:  # pragma: no cover - optional
     trafilatura = None  # type: ignore[assignment]
 
+from .article_extractor import ArticleExtractor
 from .collectors import RedditCollector, TwitterCollector, YouTubeCollector, rank_topics
 
 logger = logging.getLogger(__name__)
@@ -26,8 +27,8 @@ KW_EXTRACTOR = yake.KeywordExtractor(lan="en", n=2, top=12, dedupLim=0.5)
 
 
 class TopicScraper:
-    MIN_ARTICLE_CHARS = 300
-    IDEAL_ARTICLE_CHARS = 600
+    MIN_ARTICLE_CHARS = 400
+    IDEAL_ARTICLE_CHARS = 700
     SEARCH_RSS_TEMPLATE = "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
 
     def __init__(self):
@@ -51,12 +52,14 @@ class TopicScraper:
             raise ValueError("Channel configuration missing 'channels' section in channels.yaml")
 
         self.channel_config = channels
+        self.article_extractor = ArticleExtractor()
         self.metrics = {
             "topics_scraped": 0,
             "topics_with_articles": 0,
             "topics_with_short_content": 0,
             "topics_failed_extraction": 0,
             "topics_discarded_no_article": 0,
+            "article_extraction": {},
         }
 
     def run(self):
@@ -172,19 +175,14 @@ class TopicScraper:
                 if not url:
                     continue
 
-                extracted_text, extracted_summary, extracted_published = self._extract_article(url)
-                if extracted_text:
-                    article_text = extracted_text.strip()
-                    summary = extracted_summary or summary or prepared["title"]
-                    published_at = (
-                        extracted_published
-                        or candidate_published
-                        or published_at
-                    )
+                extraction = self.article_extractor.extract(url)
+                if extraction:
+                    article_text = extraction.text
+                    summary = extraction.summary or summary or prepared["title"]
+                    published_at = candidate_published or extraction.published_at or published_at
                     extracted_any = True
-                    prepared["url"] = url
-                    if len(article_text) >= self.MIN_ARTICLE_CHARS:
-                        break
+                    prepared["url"] = extraction.url
+                    break
 
             if not extracted_any:
                 self.metrics["topics_failed_extraction"] += 1
@@ -330,7 +328,20 @@ class TopicScraper:
     def _log_metrics(self):
         print("\n--- Scraper Metrics ---")
         for key, value in self.metrics.items():
+            if key == "article_extraction":
+                continue
             print(f"{key}: {value}")
+
+        extraction_metrics = self.article_extractor.get_metrics()
+        self.metrics["article_extraction"] = extraction_metrics
+        for key, value in extraction_metrics.items():
+            if key == "total_word_count":
+                continue
+            print(f"article_{key}: {int(value) if isinstance(value, (int, float)) else value}")
+        valid = extraction_metrics.get("articles_valid", 0)
+        if valid:
+            avg_len = extraction_metrics["total_word_count"] / max(valid, 1)
+            print(f"article_avg_word_count: {avg_len:.1f}")
         print("-----------------------\n")
 
     @staticmethod
