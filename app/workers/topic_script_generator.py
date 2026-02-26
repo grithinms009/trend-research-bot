@@ -179,9 +179,20 @@ class TopicScriptGenerator:
                 return None
 
         if word_count > TARGET_MAX_WORDS:
-            logger.warning(
-                "Script for '%s' has %d words (target %d-%d) — allowing",
-                title[:60], word_count, TARGET_MIN_WORDS, TARGET_MAX_WORDS,
+            # Trim to TARGET_MAX_WORDS at sentence boundary
+            words = cleaned_output.split()
+            trimmed = " ".join(words[:TARGET_MAX_WORDS])
+            # Cut at last sentence-ending punctuation to keep clean
+            for punct in [".", "!", "?"]:
+                last_idx = trimmed.rfind(punct)
+                if last_idx > len(trimmed) // 2:  # Only if not cutting too much
+                    trimmed = trimmed[: last_idx + 1]
+                    break
+            cleaned_output = trimmed
+            word_count = len(cleaned_output.split())
+            logger.info(
+                "Script for '%s' trimmed to %d words (was over %d)",
+                title[:60], word_count, TARGET_MAX_WORDS,
             )
 
         # ========== HALLUCINATION CHECK (lightweight) ==========

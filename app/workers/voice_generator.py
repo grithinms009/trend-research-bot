@@ -1,3 +1,10 @@
+"""
+Voice Generator — converts scene narration text to audio using ElevenLabs TTS.
+
+Reads scene plans from data/scene_plans/{date}/ (matching scene_splitter output).
+Generates MP3 audio files per scene using ElevenLabs API.
+"""
+
 import glob
 import json
 import logging
@@ -40,13 +47,20 @@ class VoiceGeneratorWorker:
             "total_estimated_duration_sec": 0.0,
         }
 
-    def _load_scene_plan(self, path: str) -> Optional[Dict[str, Any]]:
+    def _load_scene_plans(self, path: str) -> List[Dict[str, Any]]:
+        """Load scene plans from a JSON file (may be a list of plans)."""
         try:
             with open(path) as f:
-                return json.load(f)
+                data = json.load(f)
+            # scene_splitter outputs a list of scene plans per channel
+            if isinstance(data, list):
+                return data
+            elif isinstance(data, dict):
+                return [data]
+            return []
         except Exception as exc:
             logger.error("Failed to read scene plan %s: %s", path, exc)
-            return None
+            return []
 
     def _synthesize_audio(self, narration: str, retries: int = 1) -> Optional[bytes]:
         headers = {
@@ -98,80 +112,103 @@ class VoiceGeneratorWorker:
         audio_root = os.path.join(base_dir, "data", "audio")
         os.makedirs(audio_root, exist_ok=True)
 
+        # Find scene plan files — check both flat and date-subdirectory structures
         scene_files = sorted(glob.glob(os.path.join(scene_plan_dir, "*.json")))
+        # Also check subdirectories (scene_splitter writes to scene_plans/{date}/)
+        scene_files += sorted(glob.glob(os.path.join(scene_plan_dir, "*", "*.json")))
+
         if not scene_files:
             print("No scene plans found for voice generation.")
             return 0
 
-        print(f"Found {len(scene_files)} scene plans...")
+        print(f"Found {len(scene_files)} scene plan files...")
 
         for plan_path in scene_files:
-            plan = self._load_scene_plan(plan_path)
-            if not plan:
-                continue
+            plans = self._load_scene_plans(plan_path)
 
-            topic_id = str(plan.get("topic_id") or os.path.splitext(os.path.basename(plan_path))[0])
-            scenes: List[Dict[str, Any]] = plan.get("scenes") or []
-            if not scenes:
-                logger.warning("Scene plan %s has no scenes; skipping", plan_path)
-                continue
-
-            self.metrics["topics_processed"] += 1
-            topic_duration = 0.0
-            for scene in scenes:
-                dur = scene.get("estimated_duration_sec")
-                if isinstance(dur, (int, float)):
-                    topic_duration += float(dur)
-
-            self.metrics["total_estimated_duration_sec"] += topic_duration
-
-            topic_dir = self._topic_output_dir(audio_root, topic_id)
-            logger.info("Generating audio for topic %s (%d scenes)", topic_id, len(scenes))
-
-            for idx, scene in enumerate(scenes, start=1):
-                narration = (scene.get("narration") or "").strip()
-                if not narration:
-                    logger.warning("Scene %s in topic %s has empty narration; skipping", scene.get("scene_id"), topic_id)
+            for plan in plans:
+                if not isinstance(plan, dict):
                     continue
 
-                scene_id = scene.get("scene_id") or idx
-                filename = f"scene_{str(scene_id).zfill(2)}.mp3"
-                output_path = os.path.join(topic_dir, filename)
+                # Build topic ID from plan data
+                title = plan.get("title", "unknown")
+                channel = plan.get("channel_id", "XX")
+                # Create a clean filesystem-safe topic ID
+                safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in title)[:50].strip().replace(" ", "_")
+                topic_id = f"{channel}_{safe_title}"
 
-                self.metrics["scenes_total"] += 1
-
-                if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                    self.metrics["scenes_skipped_existing"] += 1
+                # Support both scene_splitter output format ("text") and
+                # legacy scene_planner format ("narration")
+                scenes: List[Dict[str, Any]] = plan.get("scenes") or []
+                if not scenes:
+                    logger.warning("Scene plan '%s' has no scenes; skipping", title[:60])
                     continue
 
-                start_time = time.time()
-                audio_bytes = self._synthesize_audio(narration, retries=1)
-                elapsed = round(time.time() - start_time, 2)
+                self.metrics["topics_processed"] += 1
+                topic_duration = 0.0
+                for scene in scenes:
+                    # Support both key names
+                    dur = (
+                        scene.get("estimated_duration_sec")
+                        or scene.get("estimated_duration")
+                        or 0
+                    )
+                    if isinstance(dur, (int, float)):
+                        topic_duration += float(dur)
 
-                if not audio_bytes:
-                    self.metrics["scenes_failed"] += 1
-                    logger.error("Failed to generate audio for topic %s scene %s", topic_id, scene_id)
-                    continue
+                self.metrics["total_estimated_duration_sec"] += topic_duration
 
-                with open(output_path, "wb") as audio_file:
-                    audio_file.write(audio_bytes)
+                topic_dir = self._topic_output_dir(audio_root, topic_id)
+                logger.info("Generating audio for topic '%s' (%d scenes)", title[:60], len(scenes))
+                print(f"  Generating audio for '{title[:60]}' ({len(scenes)} scenes)...")
 
-                if os.path.getsize(output_path) == 0:
-                    self.metrics["scenes_failed"] += 1
-                    logger.error("Empty audio file for topic %s scene %s", topic_id, scene_id)
-                    continue
+                for idx, scene in enumerate(scenes, start=1):
+                    # Support both "narration" (legacy) and "text" (scene_splitter) keys
+                    narration = (
+                        scene.get("narration")
+                        or scene.get("text")
+                        or ""
+                    ).strip()
+                    if not narration:
+                        logger.warning("Scene %d in '%s' has empty text; skipping", idx, title[:60])
+                        continue
 
-                self.metrics["scenes_generated"] += 1
-                self.metrics["scene_generation_times"].append(elapsed)
-                logger.info(
-                    "Generated audio for topic %s scene %s in %ss",
-                    topic_id,
-                    scene_id,
-                    elapsed,
-                )
+                    scene_num = scene.get("scene_number") or scene.get("scene_id") or idx
+                    filename = f"scene_{str(scene_num).zfill(2)}.mp3"
+                    output_path = os.path.join(topic_dir, filename)
 
-            if topic_duration:
-                logger.info("Estimated total audio duration for topic %s: %.1fs", topic_id, topic_duration)
+                    self.metrics["scenes_total"] += 1
+
+                    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                        self.metrics["scenes_skipped_existing"] += 1
+                        continue
+
+                    start_time = time.time()
+                    audio_bytes = self._synthesize_audio(narration, retries=1)
+                    elapsed = round(time.time() - start_time, 2)
+
+                    if not audio_bytes:
+                        self.metrics["scenes_failed"] += 1
+                        logger.error("Failed to generate audio for '%s' scene %s", title[:60], scene_num)
+                        continue
+
+                    with open(output_path, "wb") as audio_file:
+                        audio_file.write(audio_bytes)
+
+                    if os.path.getsize(output_path) == 0:
+                        self.metrics["scenes_failed"] += 1
+                        logger.error("Empty audio file for '%s' scene %s", title[:60], scene_num)
+                        continue
+
+                    self.metrics["scenes_generated"] += 1
+                    self.metrics["scene_generation_times"].append(elapsed)
+                    logger.info(
+                        "Generated audio for '%s' scene %s in %ss",
+                        title[:60], scene_num, elapsed,
+                    )
+
+                if topic_duration:
+                    logger.info("Estimated total audio duration for '%s': %.1fs", title[:60], topic_duration)
 
         self._log_metrics()
         print(f"Audio files generated: {self.metrics['scenes_generated']}")

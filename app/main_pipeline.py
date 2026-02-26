@@ -277,7 +277,8 @@ def print_health_report():
 
     # Success rates
     validation_rate = (validated / analyzed * 100) if analyzed > 0 else 0
-    script_rate = (generated / max(dispatched, 1) * 100) if dispatched > 0 else 0
+    # Use validated as denominator for script rate (dispatched files get consumed)
+    script_rate = (generated / max(validated, 1) * 100) if validated > 0 else 0
     scene_rate = (scenes / max(generated, 1) * 100) if generated > 0 else 0
     audio_rate = (audio_clips / max(scenes, 1) * 100) if scenes > 0 else 0
 

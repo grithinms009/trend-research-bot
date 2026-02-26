@@ -128,27 +128,59 @@ class GoogleNewsCollector(BaseCollector):
 
     @staticmethod
     def _resolve_google_url(google_url: str) -> str:
-        """Follow Google News redirect to get the actual article URL."""
+        """Follow Google News redirect to get the actual article URL.
+        
+        Google News uses JS-based redirects, so requests.head() won't work.
+        We try requests.get() first, then parse HTML for canonical/og:url.
+        """
         if "news.google.com" not in google_url:
             return google_url
         try:
-            resp = requests.head(
+            resp = requests.get(
                 google_url,
                 allow_redirects=True,
                 timeout=REQUEST_TIMEOUT,
-                headers={"User-Agent": "Mozilla/5.0"},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                },
             )
             final_url = resp.url
-            # If we still end up on Google, try GET with redirect
-            if "google.com" in final_url:
-                resp = requests.get(
-                    google_url,
-                    allow_redirects=True,
-                    timeout=REQUEST_TIMEOUT,
-                    headers={"User-Agent": "Mozilla/5.0"},
-                )
-                final_url = resp.url
-            return final_url if "google.com" not in final_url else google_url
+
+            # If we ended up at a real article, use it
+            if "google.com" not in final_url and "google." not in final_url:
+                return final_url
+
+            # Still on Google — try parsing the page for the real article URL
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            # Try canonical link
+            canonical = soup.find("link", {"rel": "canonical"})
+            if canonical and canonical.get("href"):
+                href = canonical["href"]
+                if "google.com" not in href:
+                    return href
+
+            # Try og:url meta tag
+            og_url = soup.find("meta", {"property": "og:url"})
+            if og_url and og_url.get("content"):
+                content = og_url["content"]
+                if "google.com" not in content:
+                    return content
+
+            # Try data-url or href attributes in article links
+            for a_tag in soup.find_all("a", href=True):
+                href = a_tag["href"]
+                if href.startswith("http") and "google.com" not in href and "google." not in href:
+                    return href
+
+            # Last resort: try extracting from the URL path itself
+            # Google News URLs sometimes embed the target: /articles/...
+            if "/articles/" in google_url:
+                # Can't extract from this format, return as-is
+                pass
+
         except Exception as exc:
             logger.debug("Failed to resolve Google URL %s: %s", google_url[:60], exc)
-            return google_url
+
+        return google_url
