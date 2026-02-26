@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover - optional
     trafilatura = None  # type: ignore[assignment]
 
 from .article_extractor import ArticleExtractor
-from .collectors import RedditCollector, TwitterCollector, YouTubeCollector, rank_topics
+from .collectors import RedditCollector, TwitterCollector, YouTubeCollector, GoogleNewsCollector, rank_topics
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,8 @@ class TopicScraper:
         self.collectors = [
             RedditCollector(),
             TwitterCollector(),
-            YouTubeCollector()
+            YouTubeCollector(),
+            GoogleNewsCollector(),
         ]
         
         # Load channel configuration

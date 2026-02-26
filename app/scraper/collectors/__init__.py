@@ -14,11 +14,13 @@ if __package__ in {None, ""}:
 from app.scraper.collectors.reddit import RedditCollector
 from app.scraper.collectors.twitter import TwitterCollector
 from app.scraper.collectors.youtube import YouTubeCollector
+from app.scraper.collectors.google_news import GoogleNewsCollector
 from app.scraper.collectors.ranker import rank_topics
 
 __all__ = [
     "RedditCollector",
     "TwitterCollector",
     "YouTubeCollector",
+    "GoogleNewsCollector",
     "rank_topics",
 ]

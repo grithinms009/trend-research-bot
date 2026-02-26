@@ -13,9 +13,24 @@ from .base_collector import BaseCollector
 logger = logging.getLogger(__name__)
 
 SUBREDDIT_FEEDS = [
+    # C1 — AI / Tech News
     "https://www.reddit.com/r/worldnews/.rss",
     "https://www.reddit.com/r/technology/.rss",
+    "https://www.reddit.com/r/artificial/.rss",
+    # C2 — Finance / Markets
+    "https://www.reddit.com/r/stocks/.rss",
+    "https://www.reddit.com/r/cryptocurrency/.rss",
+    "https://www.reddit.com/r/economics/.rss",
+    # C3 — History / Science
     "https://www.reddit.com/r/science/.rss",
+    "https://www.reddit.com/r/space/.rss",
+    "https://www.reddit.com/r/history/.rss",
+    "https://www.reddit.com/r/todayilearned/.rss",
+    # C4 — Luxury / Travel
+    "https://www.reddit.com/r/travel/.rss",
+    # C5 — Productivity / Life Hacks
+    "https://www.reddit.com/r/productivity/.rss",
+    "https://www.reddit.com/r/getdisciplined/.rss",
 ]
 
 MAX_ENTRIES_PER_FEED = 15

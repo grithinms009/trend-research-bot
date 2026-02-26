@@ -16,7 +16,7 @@ class OllamaClient:
     }
 
     @classmethod
-    def generate(cls, prompt: str, model: str = "mistral:latest", timeout: int = 120) -> Optional[str]:
+    def generate(cls, prompt: str, model: str = "mistral:latest", timeout: int = 300) -> Optional[str]:
         """
         Generate text using Ollama 'run' command.
         
@@ -68,13 +68,15 @@ class OllamaClient:
             return None
 
     @classmethod
-    def generate_with_retry(cls, prompt: str, model: str = "mistral:latest", timeout: int = 120, retries: int = 1) -> Optional[str]:
-        """Generate with a simple retry mechanism."""
+    def generate_with_retry(cls, prompt: str, model: str = "mistral:latest", timeout: int = 300, retries: int = 2) -> Optional[str]:
+        """Generate with retry and exponential backoff."""
+        backoff_delays = [2, 5, 10]
         for attempt in range(retries + 1):
             response = cls.generate(prompt, model, timeout)
             if response:
                 return response
             if attempt < retries:
-                logger.warning(f"Retrying Ollama generation (attempt {attempt + 1}/{retries})...")
-                time.sleep(2)  # Small delay before retry
+                delay = backoff_delays[min(attempt, len(backoff_delays) - 1)]
+                logger.warning(f"Retrying Ollama generation (attempt {attempt + 1}/{retries}), backoff {delay}s...")
+                time.sleep(delay)
         return None

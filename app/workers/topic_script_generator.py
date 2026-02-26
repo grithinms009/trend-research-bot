@@ -116,6 +116,14 @@ class TopicScriptGenerator:
             "5. Script length: exactly 120-160 words. No more, no less.\n"
             "6. If the article text does not contain sufficient factual detail, "
             "return exactly: SKIP_INSUFFICIENT_DATA\n\n"
+            "FORMAT EXAMPLE (follow this structure):\n"
+            '"Breaking news in the tech world! [Company] has just announced [event]. '
+            'This development marks a significant shift in [industry]. '
+            'According to reports, [key fact 1]. The impact is already being felt as [key fact 2]. '
+            'Experts point out that [key fact 3]. '
+            'For [affected group], this means [consequence]. '
+            'Stay tuned for more updates on this developing story. '
+            'Like and subscribe for daily tech news!"\n\n'
             f"TITLE: {title}\n"
             f"ARTICLE SUMMARY: {summary or title}\n"
             f"SOURCE URL: {url or 'unknown'}\n"
@@ -132,8 +140,8 @@ class TopicScriptGenerator:
         script_text = OllamaClient.generate_with_retry(
             full_prompt, 
             model=model,
-            timeout=120,
-            retries=1
+            timeout=300,
+            retries=2
         )
 
         gen_time = round(time.time() - start_time, 2)

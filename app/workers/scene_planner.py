@@ -41,13 +41,15 @@ class ScenePlanner:
         user_prompt = (
             "Split the following narration script into 4–6 cinematic scenes.\n\n"
             "For each scene:\n"
-            "- assign scene_id\n"
+            "- assign scene_id (integer starting from 1)\n"
             "- assign type (hook/context/escalation/insight/resolution/cta)\n"
             "- keep exact narration text (do not rewrite)\n"
             "- generate detailed cinematic visual_prompt\n"
-            "- estimate duration in seconds (150 words per minute)\n\n"
+            "- estimate estimated_duration_sec (use 150 words per minute)\n\n"
             "If the script length is less than 120 words, return exactly: SKIP_SHORT_SCRIPT.\n\n"
-            "Return valid JSON only.\n\n"
+            "Return ONLY valid JSON in this exact format:\n"
+            '{"scenes": [{"scene_id": 1, "type": "hook", "narration": "...", '
+            '"visual_prompt": "...", "estimated_duration_sec": 8.0}, ...]}\n\n'
             "SCRIPT:\n\"\"\"\n"
             f"{script.script_text}\n"
             "\"\"\"\n"
@@ -62,21 +64,47 @@ class ScenePlanner:
 
         # Direct parse first
         try:
-            return json.loads(raw)
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return {"scenes": parsed}
+            return parsed
         except json.JSONDecodeError:
             pass
+
+        # Try to extract JSON from markdown code fences
+        fence_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', raw, re.DOTALL)
+        if fence_match:
+            try:
+                parsed = json.loads(fence_match.group(1).strip())
+                if isinstance(parsed, list):
+                    return {"scenes": parsed}
+                return parsed
+            except json.JSONDecodeError:
+                pass
 
         # Try to extract JSON object from surrounding text
         start = raw.find("{")
         end = raw.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return None
+        if start != -1 and end != -1 and end > start:
+            candidate = raw[start : end + 1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
 
-        candidate = raw[start : end + 1]
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError:
-            return None
+        # Try to extract JSON array from surrounding text
+        start = raw.find("[")
+        end = raw.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            candidate = raw[start : end + 1]
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, list):
+                    return {"scenes": parsed}
+            except json.JSONDecodeError:
+                pass
+
+        return None
 
     def _validate_scene_plan(self, plan: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not isinstance(plan, dict):
@@ -90,21 +118,55 @@ class ScenePlanner:
             logger.warning("Scene plan has %d scenes (expected %d-%d)", len(scenes), MIN_SCENES, MAX_SCENES)
 
         total_duration = 0.0
+        valid_scenes = []
         for scene in scenes:
             if not isinstance(scene, dict):
-                return None
+                continue
 
-            if not scene.get("visual_prompt") or not isinstance(scene.get("visual_prompt"), str):
-                return None
-            if not scene.get("narration") or not isinstance(scene.get("narration"), str):
-                return None
+            # Try multiple key names for narration
+            narration = (
+                scene.get("narration")
+                or scene.get("text")
+                or scene.get("content")
+                or scene.get("script")
+                or ""
+            )
+            if not narration or not isinstance(narration, str):
+                continue
+            scene["narration"] = narration
 
-            dur = scene.get("estimated_duration_sec")
+            # Try multiple key names for visual_prompt
+            visual_prompt = (
+                scene.get("visual_prompt")
+                or scene.get("visual")
+                or scene.get("image_prompt")
+                or scene.get("description")
+                or ""
+            )
+            if not visual_prompt or not isinstance(visual_prompt, str):
+                # Generate a default visual prompt from narration
+                visual_prompt = f"Cinematic shot illustrating: {narration[:120]}"
+            scene["visual_prompt"] = visual_prompt
+
+            # Auto-calculate duration from word count if missing
+            dur = (
+                scene.get("estimated_duration_sec")
+                or scene.get("duration")
+                or scene.get("duration_sec")
+            )
             if not isinstance(dur, (int, float)) or dur <= 0:
-                return None
+                word_count = len(narration.split())
+                dur = round((word_count / WORDS_PER_MINUTE) * 60, 2)
+            scene["estimated_duration_sec"] = float(dur)
             total_duration += float(dur)
 
-        plan["total_scenes"] = len(scenes)
+            valid_scenes.append(scene)
+
+        if not valid_scenes:
+            return None
+
+        plan["scenes"] = valid_scenes
+        plan["total_scenes"] = len(valid_scenes)
         plan["total_estimated_duration_sec"] = round(total_duration, 2)
         return plan
 
