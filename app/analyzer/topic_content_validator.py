@@ -20,16 +20,17 @@ logger = logging.getLogger(__name__)
 
 MIN_ARTICLE_LENGTH = 400
 
-# Only reject if these phrases appear 3+ times (cookie walls repeat, real articles don't)
+# Only reject if these EXACT multi-word phrases appear many times.
+# Cookie walls repeat consent language in dense clusters.
+# Real articles almost never have these.
 COOKIE_WALL_PHRASES = [
-    "accept all",
-    "reject all",
+    "we use cookies",
     "cookie policy",
-    "privacy policy",
-    "g.co/privacytools",
-    "cookies and data",
-    "manage preferences",
+    "manage cookie preferences",
     "consent to cookies",
+    "by continuing to use this site",
+    "g.co/privacytools",
+    "before you continue to google",
 ]
 
 
@@ -61,15 +62,16 @@ class TopicContentValidator:
                 )
                 continue
 
-            # 2. Cookie-wall check — only reject if phrases appear 3+ times total
+            # 2. Cookie-wall / boilerplate check
+            #    Only reject if cookie phrases appear 2+ times (real articles rarely mention these)
             cookie_hits = sum(
-                lower_article.count(phrase)
-                for phrase in COOKIE_WALL_PHRASES
+                1 for phrase in COOKIE_WALL_PHRASES
+                if phrase in lower_article
             )
-            if cookie_hits >= 3:
+            if cookie_hits >= 2:
                 self.metrics["topics_rejected_cookie"] += 1
                 logger.warning(
-                    "Validator: '%s' rejected — cookie/boilerplate content (%d hits)",
+                    "Validator: '%s' rejected — cookie/boilerplate content (%d phrase matches)",
                     title[:60], cookie_hits,
                 )
                 continue

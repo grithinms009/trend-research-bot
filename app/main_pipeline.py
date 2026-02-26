@@ -221,8 +221,8 @@ def get_script_stats():
                 except Exception:
                     pass
 
-    avg_length = sum(word_counts) / len(word_counts) if word_counts else 0
-    avg_gen_time = sum(gen_times) / len(gen_times) if gen_times else 0
+    avg_length = float(sum(word_counts) / len(word_counts)) if word_counts else 0.0
+    avg_gen_time = float(sum(gen_times) / len(gen_times)) if gen_times else 0.0
 
     return len(word_counts), avg_length, avg_gen_time
 

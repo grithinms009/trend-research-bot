@@ -3,6 +3,7 @@ Google News RSS collector — fetches trending articles per channel category.
 
 Provides high-quality articles with real URLs for all 5 channels by
 querying category-specific search terms via Google News RSS.
+Resolves Google News redirect URLs to actual article URLs.
 """
 
 import logging
@@ -10,6 +11,7 @@ from typing import Dict, List
 from urllib.parse import quote_plus
 
 import feedparser
+import requests
 from dateutil import parser as dateparser
 
 from .base_collector import BaseCollector
@@ -18,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 MAX_ENTRIES_PER_QUERY = 8
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+REQUEST_TIMEOUT = 10
 
 # Category-specific search queries mapped to channels
 CHANNEL_QUERIES = {
@@ -94,7 +97,9 @@ class GoogleNewsCollector(BaseCollector):
                 except Exception:
                     published_at = pub_field
 
-            url = getattr(entry, "link", "")
+            # Google News URLs are redirects — resolve to actual article URL
+            raw_url = getattr(entry, "link", "")
+            url = self._resolve_google_url(raw_url) if raw_url else ""
             title = getattr(entry, "title", "")
 
             if not title or not url:
@@ -120,3 +125,30 @@ class GoogleNewsCollector(BaseCollector):
             topics.append(enriched)
 
         return topics
+
+    @staticmethod
+    def _resolve_google_url(google_url: str) -> str:
+        """Follow Google News redirect to get the actual article URL."""
+        if "news.google.com" not in google_url:
+            return google_url
+        try:
+            resp = requests.head(
+                google_url,
+                allow_redirects=True,
+                timeout=REQUEST_TIMEOUT,
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            final_url = resp.url
+            # If we still end up on Google, try GET with redirect
+            if "google.com" in final_url:
+                resp = requests.get(
+                    google_url,
+                    allow_redirects=True,
+                    timeout=REQUEST_TIMEOUT,
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                final_url = resp.url
+            return final_url if "google.com" not in final_url else google_url
+        except Exception as exc:
+            logger.debug("Failed to resolve Google URL %s: %s", google_url[:60], exc)
+            return google_url
