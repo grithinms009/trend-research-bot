@@ -1,42 +1,58 @@
-import subprocess
-import time
-import logging
+"""
+AI Factory Pipeline — production-grade orchestrator.
+
+10-stage pipeline optimized for throughput:
+  scraper → cleaner → analyzer → validator(HALT if 0) → cluster →
+  prioritizer → dispatcher → script_generator → scene_splitter → voice_generator
+
+Hard halt after validator if 0 topics survive.
+Comprehensive health report with pipeline health flags.
+"""
+
 import os
+import sys
 import json
 import glob
+import time
+import logging
+import subprocess
 from datetime import datetime
 
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-BASE_DIR = os.path.dirname(PROJECT_ROOT)  # trend-research-bot root
-LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
+# Setup logging
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 logging.basicConfig(
-    filename=f"{LOG_DIR}/pipeline.log",
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(os.path.join(LOG_DIR, f"pipeline_{datetime.now().strftime('%Y%m%d_%H%M')}.log")),
+        logging.StreamHandler(),
+    ],
 )
 
-# Also log to console
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-logging.getLogger().addHandler(console_handler)
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(PROJECT_ROOT)
 
-# Use module names for python -m execution
+# ==================== PRODUCTION PIPELINE ====================
+# 10 stages — no duplicates, no LLM scene planner
 PIPELINE = [
     "app.scraper.topic_scraper",
     "app.scraper.topic_cleaner",
     "app.analyzer.topic_analyzer",
     "app.analyzer.topic_content_validator",
+    # --- HARD HALT CHECK HERE IF 0 VALIDATED ---
     "app.analyzer.topic_cluster",
     "app.analyzer.topic_prioritizer",
     "app.dispatcher.topic_dispatcher",
-    "app.workers.topic_generator_worker",
     "app.workers.topic_script_generator",
-    "app.workers.scene_planner",
+    "app.workers.scene_splitter",
     "app.workers.voice_generator",
 ]
+
+# Validator is the halt-check stage
+HALT_CHECK_STAGE = "app.analyzer.topic_content_validator"
+HALT_CHECK_DIR = "data/topics_validated"
 
 # Stage-to-data mapping for metrics collection
 STAGE_DATA_DIRS = {
@@ -47,9 +63,8 @@ STAGE_DATA_DIRS = {
     "app.analyzer.topic_cluster": ("data/topic_clusters", "clustered"),
     "app.analyzer.topic_prioritizer": ("data/topic_queue", "queued"),
     "app.dispatcher.topic_dispatcher": ("data/topic_generated", "dispatched"),
-    "app.workers.topic_generator_worker": ("data/topic_scripts", "generated"),
     "app.workers.topic_script_generator": ("data/topic_scripts", "generated"),
-    "app.workers.scene_planner": ("data/scene_plans", "scene_planned"),
+    "app.workers.scene_splitter": ("data/scene_plans", "scene_split"),
     "app.workers.voice_generator": ("data/audio", "audio"),
 }
 
@@ -116,21 +131,19 @@ def run_step(module_name):
     logging.info(f"STARTING {module_name}")
 
     env = os.environ.copy()
-    # PYTHONPATH should include the project root (parent of app)
     env["PYTHONPATH"] = os.path.dirname(PROJECT_ROOT)
 
     result = subprocess.run(
         ["python3", "-m", module_name],
-        cwd=os.path.dirname(PROJECT_ROOT),  # Run from parent of app to find app module
+        cwd=os.path.dirname(PROJECT_ROOT),
         env=env,
         capture_output=True,
-        text=True
+        text=True,
     )
 
     end = time.time()
-    duration = round(float(end - start), 2)  # pyre-ignore[6]
+    duration = round(float(end - start), 2)
 
-    # Collect stage output for logging
     stage_output = result.stdout
 
     # Track metrics per stage
@@ -156,13 +169,62 @@ def run_step(module_name):
     logging.info(f"COMPLETED {module_name} in {duration}s")
     logging.info(stage_output)
     print(f"✔ {module_name} completed in {duration}s")
-    
-    # Print stage output (filtered for key lines)
+
+    # Print stage output
     if stage_output:
         for line in stage_output.strip().split("\n"):
             line = line.strip()
             if line and not line.startswith("---"):
                 print(f"  │ {line}")
+
+    return output_count
+
+
+def check_halt_condition():
+    """Check if pipeline should halt after validator stage."""
+    validated_count = count_items_in_latest_json(HALT_CHECK_DIR)
+    if validated_count == 0:
+        print("\n" + "=" * 60)
+        print("🛑 PIPELINE HALTED — 0 validated topics")
+        print("   No content survived validation. Downstream stages skipped.")
+        print("   Check scraper sources and article extraction quality.")
+        print("=" * 60)
+        logging.error("PIPELINE HALTED: 0 validated topics after content validation")
+        return True
+    print(f"\n✅ {validated_count} validated topics — continuing pipeline\n")
+    return False
+
+
+def get_script_stats():
+    """Compute script-level stats for health report."""
+    scripts_dir = os.path.join(BASE_DIR, "data", "topic_scripts")
+    if not os.path.exists(scripts_dir):
+        return 0, 0.0, []
+
+    word_counts = []
+    gen_times = []
+
+    for root, _, files in os.walk(scripts_dir):
+        for fname in files:
+            if fname.endswith("_scripts.json"):
+                fpath = os.path.join(root, fname)
+                try:
+                    with open(fpath) as f:
+                        scripts = json.load(f)
+                    for s in scripts:
+                        wc = s.get("word_count", 0)
+                        gt = s.get("generation_time_seconds", 0)
+                        if wc > 0:
+                            word_counts.append(wc)
+                        if gt > 0:
+                            gen_times.append(gt)
+                except Exception:
+                    pass
+
+    avg_length = sum(word_counts) / len(word_counts) if word_counts else 0
+    avg_gen_time = sum(gen_times) / len(gen_times) if gen_times else 0
+
+    return len(word_counts), avg_length, avg_gen_time
 
 
 def print_health_report():
@@ -171,13 +233,13 @@ def print_health_report():
     print("         🏥 PIPELINE HEALTH REPORT")
     print("=" * 60)
 
-    # Collect counts from data directories
+    # Collect counts
     scraped = count_items_in_latest_json("data/topics")
     cleaned = count_items_in_latest_json("data/topics_clean")
     analyzed = count_items_in_latest_json("data/topics_analyzed")
     validated = count_items_in_latest_json("data/topics_validated")
-    
-    # For clusters, count both clusters and total topics
+
+    # Cluster info
     cluster_dir = os.path.join(BASE_DIR, "data", "topic_clusters")
     cluster_count = 0
     clustered_topics = 0
@@ -194,36 +256,39 @@ def print_health_report():
     queued = count_items_in_latest_json("data/topic_queue")
     dispatched = count_items_in_latest_json("data/topic_generated")
     generated = count_items_in_latest_json("data/topic_scripts")
-    scene_plans = count_items_in_latest_json("data/scene_plans")
+    scenes = count_items_in_latest_json("data/scene_plans")
     audio_clips = count_items_in_latest_json("data/audio")
+
+    # Script stats
+    script_count, avg_script_length, avg_gen_time = get_script_stats()
 
     print(f"\n  📊 Stage Results:")
     print(f"  {'─' * 40}")
     print(f"  Scraped (raw topics):    {scraped}")
     print(f"  Cleaned (valid):         {cleaned}")
     print(f"  Analyzed:                {analyzed}")
-    print(f"  Validated:              {validated}")
+    print(f"  Validated:               {validated}")
     print(f"  Clusters:                {cluster_count} (containing {clustered_topics} topics)")
     print(f"  Queued (prioritized):    {queued}")
     print(f"  Dispatched:              {dispatched}")
     print(f"  Scripts Generated:       {generated}")
-    print(f"  Scene Plans:             {scene_plans}")
+    print(f"  Scenes Created:          {scenes}")
     print(f"  Audio Clips:             {audio_clips}")
 
-    # Success rate
-    if scraped > 0:
-        clean_rate = (cleaned / scraped) * 100
-        validated_rate = (validated / cleaned) * 100 if cleaned > 0 else 0
-        gen_rate = (generated / scraped) * 100 if generated > 0 else 0
-        scene_rate = (scene_plans / max(generated, 1)) * 100 if generated > 0 else 0
-        audio_rate = (audio_clips / max(scene_plans, 1)) * 100 if scene_plans > 0 else 0
-        print(f"\n  📈 Success Rates:")
-        print(f"  {'─' * 40}")
-        print(f"  Extraction → Clean:     {clean_rate:.1f}%")
-        print(f"  Clean → Validated:      {validated_rate:.1f}%")
-        print(f"  End-to-End (→ Script):   {gen_rate:.1f}%")
-        print(f"  Script → Scenes:         {scene_rate:.1f}%")
-        print(f"  Scenes → Audio:          {audio_rate:.1f}%")
+    # Success rates
+    validation_rate = (validated / analyzed * 100) if analyzed > 0 else 0
+    script_rate = (generated / max(dispatched, 1) * 100) if dispatched > 0 else 0
+    scene_rate = (scenes / max(generated, 1) * 100) if generated > 0 else 0
+    audio_rate = (audio_clips / max(scenes, 1) * 100) if scenes > 0 else 0
+
+    print(f"\n  📈 Key Metrics:")
+    print(f"  {'─' * 40}")
+    print(f"  validation_success_rate: {validation_rate:.1f}%")
+    print(f"  script_success_rate:     {script_rate:.1f}%")
+    print(f"  avg_script_length:       {avg_script_length:.0f} words")
+    print(f"  avg_script_gen_time:     {avg_gen_time:.1f}s")
+    print(f"  scenes_created:          {scenes}")
+    print(f"  audio_files_created:     {audio_clips}")
 
     # Per-stage timing
     print(f"\n  ⏱  Stage Timings:")
@@ -244,20 +309,21 @@ def print_health_report():
         print(f"  {'─' * 40}")
         for module_name, metrics in errors:
             short_name = module_name.split(".")[-1]
-            # Show first 200 chars of stderr
             print(f"  {short_name}: {metrics['stderr'][:200]}")
 
     print(f"\n{'=' * 60}\n")
 
-    # Final verdict
-    if generated >= 3 and cleaned >= 10:
+    # ========== PIPELINE HEALTH FLAG ==========
+    if script_rate < 50 and dispatched > 0:
+        print("🚨 PIPELINE UNHEALTHY — script_success_rate < 50%")
+    elif generated >= 5 and scenes >= 5:
         print("🏆 PIPELINE HEALTHY — targets met!")
-    elif generated > 0 and cleaned >= 5:
-        print("⚠️  PIPELINE PARTIAL — some targets not met, but producing output")
-    elif cleaned > 0:
-        print("❌ PIPELINE UNHEALTHY — cleaning works but generation failed")
+    elif generated > 0 and scenes > 0:
+        print("⚠️  PIPELINE PARTIAL — producing output, below targets")
+    elif validated > 0:
+        print("❌ PIPELINE DEGRADED — validated topics exist but no scripts generated")
     else:
-        print("🚨 PIPELINE BROKEN — no valid topics surviving the pipeline")
+        print("🚨 PIPELINE BROKEN — no topics surviving pipeline")
 
 
 def main():
@@ -265,22 +331,33 @@ def main():
     logging.info("========== PIPELINE START ==========")
 
     pipeline_start = time.time()
+    halted = False
 
     for step in PIPELINE:
         try:
             run_step(step)
+
+            # Hard halt check after validator
+            if step == HALT_CHECK_STAGE:
+                if check_halt_condition():
+                    halted = True
+                    break
+
         except Exception as e:
             logging.error(f"Pipeline stopped at {step}: {e}")
             print(f"\n🛑 Pipeline stopped at {step}")
             break
 
-    total_time = round(float(time.time() - pipeline_start), 2)  # pyre-ignore[6]
+    total_time = round(float(time.time() - pipeline_start), 2)
 
     logging.info(f"PIPELINE FINISHED in {total_time}s")
     logging.info("========== PIPELINE END ==========")
 
-    print(f"\n✅ Pipeline completed in {total_time}s")
-    
+    if halted:
+        print(f"\n🛑 Pipeline halted after {total_time}s (no validated topics)")
+    else:
+        print(f"\n✅ Pipeline completed in {total_time}s")
+
     # Print comprehensive health report
     print_health_report()
 

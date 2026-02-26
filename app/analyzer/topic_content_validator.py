@@ -1,3 +1,14 @@
+"""
+Topic Content Validator — balanced validation for production pipeline.
+
+Rejects only:
+- Articles with < 400 characters
+- Cookie-wall/boilerplate content (banned phrases repeated 3+ times)
+- Duplicate content
+
+Does NOT reject normal news content with political names or keywords.
+"""
+
 import json
 import glob
 import logging
@@ -8,12 +19,17 @@ from typing import List, Dict
 logger = logging.getLogger(__name__)
 
 MIN_ARTICLE_LENGTH = 400
-BANNED_PATTERNS = [
+
+# Only reject if these phrases appear 3+ times (cookie walls repeat, real articles don't)
+COOKIE_WALL_PHRASES = [
     "accept all",
     "reject all",
-    "privacytools",
+    "cookie policy",
+    "privacy policy",
     "g.co/privacytools",
     "cookies and data",
+    "manage preferences",
+    "consent to cookies",
 ]
 
 
@@ -23,33 +39,48 @@ class TopicContentValidator:
             "topics_received": 0,
             "topics_retained": 0,
             "topics_rejected_short": 0,
-            "topics_rejected_banned": 0,
+            "topics_rejected_cookie": 0,
+            "topics_rejected_duplicate": 0,
         }
+        self._seen_titles = set()
 
     def validate(self, topics: List[Dict]) -> List[Dict]:
         valid = []
         for topic in topics or []:
             self.metrics["topics_received"] += 1
             article = (topic.get("article_text") or topic.get("content") or "").strip()
+            title = (topic.get("title") or "unknown").strip()
             lower_article = article.lower()
 
-            if len(lower_article) < MIN_ARTICLE_LENGTH:
+            # 1. Article length check
+            if len(article) < MIN_ARTICLE_LENGTH:
                 self.metrics["topics_rejected_short"] += 1
                 logger.warning(
-                    "Validator dropped topic '%s' — article_text only %d chars (min %d)",
-                    (topic.get("title") or "unknown")[:80],
-                    len(lower_article),
-                    MIN_ARTICLE_LENGTH,
+                    "Validator: '%s' rejected — %d chars (min %d)",
+                    title[:60], len(article), MIN_ARTICLE_LENGTH,
                 )
                 continue
 
-            if any(pattern in lower_article for pattern in BANNED_PATTERNS):
-                self.metrics["topics_rejected_banned"] += 1
+            # 2. Cookie-wall check — only reject if phrases appear 3+ times total
+            cookie_hits = sum(
+                lower_article.count(phrase)
+                for phrase in COOKIE_WALL_PHRASES
+            )
+            if cookie_hits >= 3:
+                self.metrics["topics_rejected_cookie"] += 1
                 logger.warning(
-                    "Validator dropped topic '%s' — banned pattern detected",
-                    (topic.get("title") or "unknown")[:80],
+                    "Validator: '%s' rejected — cookie/boilerplate content (%d hits)",
+                    title[:60], cookie_hits,
                 )
                 continue
+
+            # 3. Duplicate title check
+            title_key = title.lower().strip()
+            if title_key in self._seen_titles:
+                self.metrics["topics_rejected_duplicate"] += 1
+                logger.warning("Validator: '%s' rejected — duplicate title", title[:60])
+                continue
+            self._seen_titles.add(title_key)
 
             valid.append(topic)
 
@@ -60,6 +91,12 @@ class TopicContentValidator:
         print("\n--- Content Validator Metrics ---")
         for key, value in self.metrics.items():
             print(f"{key}: {value}")
+
+        received = self.metrics["topics_received"]
+        retained = self.metrics["topics_retained"]
+        if received > 0:
+            rate = (retained / received) * 100
+            print(f"validation_success_rate: {rate:.1f}%")
         print("-------------------------------\n")
 
 
