@@ -75,6 +75,7 @@ class VoiceGeneratorWorker:
         }
 
         for attempt in range(retries + 1):
+            response = None
             try:
                 response = requests.post(
                     self.api_url,
@@ -82,21 +83,37 @@ class VoiceGeneratorWorker:
                     json=payload,
                     timeout=60,
                 )
+            except requests.ConnectionError as exc:
+                print(f"    ❌ CONNECTION ERROR: Cannot reach ElevenLabs API: {exc}")
+                logger.error("ElevenLabs connection failed: %s", exc)
+            except requests.Timeout:
+                print(f"    ❌ TIMEOUT: ElevenLabs did not respond within 60s")
+                logger.error("ElevenLabs request timed out")
             except requests.RequestException as exc:
+                print(f"    ❌ REQUEST ERROR: {type(exc).__name__}: {exc}")
                 logger.error("ElevenLabs request failed: %s", exc)
-                response = None
-
-            if response and response.status_code == 200 and response.content:
-                return response.content
 
             if response is not None:
-                logger.error(
-                    "ElevenLabs returned %s: %s",
-                    response.status_code,
-                    response.text[:200],
-                )
+                if response.status_code == 200 and response.content and len(response.content) > 100:
+                    return response.content
+
+                # Log the ACTUAL error with full detail
+                status = response.status_code
+                body = response.text[:300]
+                print(f"    ❌ ElevenLabs HTTP {status}: {body}")
+                logger.error("ElevenLabs returned %s: %s", status, body)
+
+                if status == 401:
+                    print("    🔑 Invalid API key — check ELEVENLABS_API_KEY in .env")
+                elif status == 404:
+                    print(f"    🔍 Voice ID '{self.voice_id}' not found — check ELEVENLABS_VOICE_ID")
+                elif status == 422:
+                    print("    📝 Invalid request payload")
+                elif status == 429:
+                    print("    ⏳ Rate limited or quota exceeded")
 
             if attempt < retries:
+                print(f"    Retrying in 2s... (attempt {attempt + 1}/{retries})")
                 time.sleep(2)
 
         return None
