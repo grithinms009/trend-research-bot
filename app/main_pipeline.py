@@ -35,7 +35,7 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(PROJECT_ROOT)
 
 # ==================== PRODUCTION PIPELINE ====================
-# 14 stages — full creative shorts pipeline
+# 15 stages — cinematic shorts engine
 PIPELINE = [
     "app.scraper.topic_scraper",
     "app.scraper.topic_cleaner",
@@ -46,11 +46,13 @@ PIPELINE = [
     "app.analyzer.topic_prioritizer",
     "app.dispatcher.topic_dispatcher",
     "app.workers.topic_script_generator",
-    "app.workers.script_cleaner",           # NEW: strip labels/markdown
-    "app.workers.scene_planner",            # REPLACED: LLM scene planner with emotion/energy
+    "app.workers.script_cleaner",
+    "app.workers.scene_planner",
+    "app.video.cinematic_director",          # NEW: film-level editing decisions
     "app.workers.voice_generator",
     # --- VIDEO PIPELINE ---
     "app.video.video_builder_shorts",
+    "app.video.quality_checker",             # NEW: pre-export validation
     "app.video.cleanup",
 ]
 
@@ -70,10 +72,13 @@ STAGE_DATA_DIRS = {
     "app.workers.topic_script_generator": ("data/topic_scripts", "generated"),
     "app.workers.script_cleaner": ("data/topic_scripts_clean", "cleaned_scripts"),
     "app.workers.scene_planner": ("data/scene_plans", "scene_planned"),
+    "app.video.cinematic_director": ("data/directed_plans", "directed"),
     "app.workers.voice_generator": ("data/audio", "audio"),
     "app.video.video_builder_shorts": ("data/shorts/final", "video"),
+    "app.video.quality_checker": ("", "qc"),
     "app.video.cleanup": ("", "cleanup"),
 }
+
 
 stage_metrics = {}
 
