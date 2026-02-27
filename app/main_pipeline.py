@@ -35,7 +35,7 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(PROJECT_ROOT)
 
 # ==================== PRODUCTION PIPELINE ====================
-# 13 stages — full shorts pipeline
+# 14 stages — full creative shorts pipeline
 PIPELINE = [
     "app.scraper.topic_scraper",
     "app.scraper.topic_cleaner",
@@ -46,7 +46,8 @@ PIPELINE = [
     "app.analyzer.topic_prioritizer",
     "app.dispatcher.topic_dispatcher",
     "app.workers.topic_script_generator",
-    "app.workers.scene_splitter",
+    "app.workers.script_cleaner",           # NEW: strip labels/markdown
+    "app.workers.scene_planner",            # REPLACED: LLM scene planner with emotion/energy
     "app.workers.voice_generator",
     # --- VIDEO PIPELINE ---
     "app.video.video_builder_shorts",
@@ -67,7 +68,8 @@ STAGE_DATA_DIRS = {
     "app.analyzer.topic_prioritizer": ("data/topic_queue", "queued"),
     "app.dispatcher.topic_dispatcher": ("data/topic_generated", "dispatched"),
     "app.workers.topic_script_generator": ("data/topic_scripts", "generated"),
-    "app.workers.scene_splitter": ("data/scene_plans", "scene_split"),
+    "app.workers.script_cleaner": ("data/topic_scripts_clean", "cleaned_scripts"),
+    "app.workers.scene_planner": ("data/scene_plans", "scene_planned"),
     "app.workers.voice_generator": ("data/audio", "audio"),
     "app.video.video_builder_shorts": ("data/shorts/final", "video"),
     "app.video.cleanup": ("", "cleanup"),

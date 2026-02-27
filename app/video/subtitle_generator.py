@@ -1,8 +1,11 @@
 """
-Subtitle Generator — creates .ass subtitle files for YouTube Shorts.
+Caption Engine — animated, emphasis-aware ASS subtitle generator.
 
-Generates large, bold, centered captions in channel-specific colors.
-Words are timed against audio duration for punchy 2-3 word display.
+Creates word-by-word appearing captions with:
+- emphasis_words highlighted in accent color + larger size
+- Larger font for high energy scenes (energy >= 4)
+- Channel-specific styling
+- Bounce animation on impact words via ASS override tags
 """
 
 import os
@@ -20,15 +23,15 @@ def _load_channel_config() -> Dict:
         return yaml.safe_load(f).get("channels", {})
 
 
-def _hex_to_ass_color(hex_color: str) -> str:
-    """Convert hex color #RRGGBB to ASS format &HBBGGRR&."""
-    hex_color = hex_color.lstrip("#")
-    r, g, b = hex_color[0:2], hex_color[2:4], hex_color[4:6]
+def _hex_to_ass(hex_color: str) -> str:
+    """Convert hex #RRGGBB to ASS &HBBGGRR&."""
+    h = hex_color.lstrip("#")
+    r, g, b = h[0:2], h[2:4], h[4:6]
     return f"&H00{b}{g}{r}&"
 
 
-def _format_ass_time(seconds: float) -> str:
-    """Format seconds to ASS timestamp: H:MM:SS.CC"""
+def _time(seconds: float) -> str:
+    """Format seconds to ASS timestamp H:MM:SS.CC"""
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = int(seconds % 60)
@@ -37,13 +40,20 @@ def _format_ass_time(seconds: float) -> str:
 
 
 def generate_ass_subtitle(scenes: List[Dict], channel_id: str, channel_config: Dict) -> str:
-    """Generate an ASS subtitle file content for a topic's scenes."""
+    """Generate animated ASS subtitles from scene plan."""
     ch = channel_config.get(channel_id, {})
-    font_color = _hex_to_ass_color(ch.get("font_color", "#FFFFFF"))
-    accent_color = _hex_to_ass_color(ch.get("accent_color", "#FFFF00"))
-    bg_color = "&H80000000&"  # Semi-transparent black outline
+    font_color = _hex_to_ass(ch.get("font_color", "#FFFFFF"))
+    accent_color = _hex_to_ass(ch.get("accent_color", "#FFFF00"))
 
-    # ASS header with YouTube Shorts styling
+    # Caption style based on channel creative profile
+    creative = ch.get("creative", {})
+    caption_style = creative.get("caption_style", "bold_impact")
+
+    # Base font sizes
+    base_size = 80 if caption_style == "bold_impact" else 70
+    emphasis_size = base_size + 20
+    high_energy_boost = 15
+
     header = f"""[Script Info]
 Title: YouTube Short
 ScriptType: v4.00+
@@ -53,8 +63,9 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Main,Arial Black,90,{font_color},{accent_color},&H00000000&,{bg_color},-1,0,0,0,100,100,0,0,1,4,2,2,40,40,200,1
-Style: Accent,Arial Black,100,{accent_color},{font_color},&H00000000&,{bg_color},-1,0,0,0,100,100,0,0,1,5,2,2,40,40,200,1
+Style: Main,Arial Black,{base_size},{font_color},{accent_color},&H00000000&,&H80000000&,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,250,1
+Style: Emphasis,Arial Black,{emphasis_size},{accent_color},{font_color},&H00000000&,&H80000000&,-1,0,0,0,100,100,0,0,1,5,2,2,40,40,250,1
+Style: HighEnergy,Arial Black,{base_size + high_energy_boost},{font_color},{accent_color},&H00000000&,&H80000000&,-1,0,0,0,100,100,0,0,1,5,2,2,40,40,250,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -64,38 +75,63 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     current_time = 0.0
 
     for scene in scenes:
-        text = scene.get("text", "")
-        duration = float(scene.get("estimated_duration", scene.get("estimated_duration_sec", 3.0)))
-        words = text.split()
+        narration = scene.get("narration", scene.get("text", ""))
+        duration = float(scene.get("estimated_duration", 3.0))
+        energy = scene.get("energy", 3)
+        emotion = scene.get("emotion", "neutral")
+        emphasis_words = [w.lower() for w in scene.get("emphasis_words", [])]
+        cut_style = scene.get("cut_style", "hard")
 
+        words = narration.split()
         if not words:
             current_time += duration
             continue
 
-        # Split words into groups of 2-3 for punchy captions
-        chunk_size = 3
+        # Word-by-word timing (2-4 words at a time for readability)
+        chunk_size = 2 if energy >= 4 else 3
         chunks = []
         for i in range(0, len(words), chunk_size):
-            chunk = " ".join(words[i:i + chunk_size])
-            chunks.append(chunk)
+            chunk_words = words[i:i + chunk_size]
+            chunks.append(chunk_words)
 
-        # Distribute time across chunks
         time_per_chunk = duration / max(len(chunks), 1)
 
-        for i, chunk in enumerate(chunks):
+        for i, chunk_words in enumerate(chunks):
             start = current_time + (i * time_per_chunk)
             end = start + time_per_chunk
 
-            # Use accent style for first chunk of each scene (hook words)
-            style = "Accent" if i == 0 else "Main"
+            # Determine if this chunk has emphasis words
+            has_emphasis = any(w.lower().strip(".,!?;:'\"") in emphasis_words for w in chunk_words)
 
-            # Clean text for ASS format
-            clean = chunk.replace("\\", "").replace("{", "").replace("}", "")
-            clean = clean.upper()  # Shorts captions are typically uppercase
+            # Build the display text with inline ASS overrides
+            display_parts = []
+            for word in chunk_words:
+                clean_word = word.strip(".,!?;:'\"").lower()
+                if clean_word in emphasis_words:
+                    # Emphasis: accent color + bounce effect (scale up briefly)
+                    display_parts.append(
+                        f"{{\\c{accent_color}\\fscx120\\fscy120\\t(0,100,\\fscx100\\fscy100)}}{word.upper()}"
+                    )
+                else:
+                    display_parts.append(word.upper())
 
-            start_ts = _format_ass_time(start)
-            end_ts = _format_ass_time(end)
-            events.append(f"Dialogue: 0,{start_ts},{end_ts},{style},,0,0,0,,{clean}")
+            display_text = " ".join(display_parts)
+
+            # Choose style based on energy level
+            if has_emphasis:
+                style = "Emphasis"
+            elif energy >= 4:
+                style = "HighEnergy"
+            else:
+                style = "Main"
+
+            # Add fade-in effect for non-smash cuts
+            if cut_style != "smash" and i == 0:
+                display_text = f"{{\\fad(100,0)}}{display_text}"
+
+            start_ts = _time(start)
+            end_ts = _time(end)
+            events.append(f"Dialogue: 0,{start_ts},{end_ts},{style},,0,0,0,,{display_text}")
 
         current_time += duration
 
@@ -143,9 +179,8 @@ def main():
 
             generate_subtitles_for_topic(plan, out_path, channel_config)
             total += 1
-            print(f"  Generated subtitles: {topic_id}.ass")
 
-    print(f"\nTotal subtitle files: {total}")
+    print(f"Total subtitle files: {total}")
 
 
 if __name__ == "__main__":

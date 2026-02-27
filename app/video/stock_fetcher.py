@@ -1,8 +1,10 @@
 """
-Stock Footage Fetcher — downloads free vertical video clips from Pexels.
+Visual Intent Stock Fetcher — maps scene emotion/intent to stock footage.
 
-Uses Pexels API (free tier, 200 requests/hour) to find relevant stock footage
-per scene. Falls back to channel-generic clips if no match found.
+Replaces literal keyword search. Uses visual_intent field from scene planner
+to find emotionally-matching stock clips from Pexels.
+
+Never searches politician names or literal controversy keywords.
 """
 
 import hashlib
@@ -10,9 +12,9 @@ import json
 import logging
 import os
 import glob
+import random
 import time
 from typing import Dict, List, Optional
-from datetime import datetime
 
 import requests
 import yaml
@@ -25,9 +27,131 @@ load_dotenv()
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
 PEXELS_VIDEO_SEARCH = "https://api.pexels.com/videos/search"
 
-# Minimum video dimensions for quality
 MIN_WIDTH = 720
 MIN_HEIGHT = 1280
+
+# ============================================================
+# VISUAL INTENT → STOCK SEARCH MAPPING
+# Symbolic intent → list of Pexels search phrases (randomized)
+# ============================================================
+VISUAL_INTENT_MAP = {
+    "abstract_tension": [
+        "dark cinematic corridor",
+        "dramatic shadows close up",
+        "abstract dark motion",
+        "moody atmospheric light",
+        "dark tunnel perspective",
+    ],
+    "document": [
+        "legal document close up",
+        "paper signing macro",
+        "official paperwork desk",
+        "contract document hand",
+        "newspaper headline close",
+    ],
+    "crowd_reaction": [
+        "crowd reacting slow motion",
+        "people shocked audience",
+        "crowd watching event",
+        "audience reaction close up",
+        "group people dramatic",
+    ],
+    "building": [
+        "government building exterior",
+        "capitol building wide shot",
+        "modern architecture city",
+        "official building dramatic sky",
+        "courthouse exterior cinematic",
+    ],
+    "tech_ui": [
+        "futuristic digital interface",
+        "AI data visualization",
+        "holographic screen technology",
+        "coding computer screen",
+        "server room lights",
+    ],
+    "luxury": [
+        "luxury mansion cinematic",
+        "private jet interior",
+        "luxury car driving",
+        "premium hotel lobby",
+        "champagne celebration slow motion",
+    ],
+    "nature": [
+        "epic landscape aerial",
+        "ocean waves cinematic",
+        "mountain aerial dramatic",
+        "forest canopy sunlight",
+        "storm clouds timelapse",
+    ],
+    "urban": [
+        "city night timelapse",
+        "downtown skyline sunset",
+        "busy street crowd motion",
+        "neon city lights rain",
+        "aerial city traffic night",
+    ],
+    "data_visualization": [
+        "stock chart analysis",
+        "data dashboard screen",
+        "financial graph animation",
+        "numbers data technology",
+        "analytics screen close",
+    ],
+    "cinematic_dark": [
+        "dark cinematic background",
+        "moody silhouette dramatic",
+        "shadow light contrast",
+        "dramatic lens flare dark",
+        "abstract smoke dark",
+    ],
+    "explosion_impact": [
+        "explosion slow motion",
+        "shockwave dramatic",
+        "debris flying cinematic",
+        "glass breaking slow motion",
+        "fire dramatic close up",
+    ],
+    "timeline": [
+        "clock time passing",
+        "calendar pages flipping",
+        "hourglass sand falling",
+        "watch mechanism macro",
+        "sunrise timelapse",
+    ],
+    "medical": [
+        "laboratory research science",
+        "hospital corridor cinematic",
+        "microscope close up",
+        "medical technology screen",
+        "science experiment lab",
+    ],
+    "military": [
+        "military formation dramatic",
+        "radar screen technology",
+        "strategic map planning",
+        "helicopter aerial dramatic",
+        "night vision technology",
+    ],
+    "money": [
+        "cash money counting",
+        "gold bars vault",
+        "coins falling slow motion",
+        "stock exchange trading floor",
+        "cryptocurrency digital",
+    ],
+}
+
+# Default fallback for unknown intents
+DEFAULT_QUERIES = [
+    "abstract cinematic background",
+    "dramatic light dark",
+    "atmospheric motion",
+]
+
+
+def _cache_key(query: str) -> str:
+    return hashlib.md5(query.encode()).hexdigest()[:12]
 
 
 def _load_channel_config() -> Dict:
@@ -37,14 +161,9 @@ def _load_channel_config() -> Dict:
         return yaml.safe_load(f).get("channels", {})
 
 
-def _cache_key(query: str) -> str:
-    return hashlib.md5(query.encode()).hexdigest()[:12]
-
-
-def search_pexels(query: str, orientation: str = "portrait", per_page: int = 3) -> List[Dict]:
-    """Search Pexels for video clips matching query."""
+def search_pexels(query: str, orientation: str = "portrait", per_page: int = 5) -> List[Dict]:
+    """Search Pexels for video clips."""
     if not PEXELS_API_KEY:
-        print("  ⚠️  PEXELS_API_KEY not set — skipping stock footage")
         return []
 
     headers = {"Authorization": PEXELS_API_KEY}
@@ -58,10 +177,9 @@ def search_pexels(query: str, orientation: str = "portrait", per_page: int = 3) 
     try:
         resp = requests.get(PEXELS_VIDEO_SEARCH, headers=headers, params=params, timeout=15)
         if resp.status_code == 200:
-            data = resp.json()
-            return data.get("videos", [])
+            return resp.json().get("videos", [])
         else:
-            logger.warning("Pexels returned %s: %s", resp.status_code, resp.text[:200])
+            logger.warning("Pexels %s: %s", resp.status_code, resp.text[:200])
             return []
     except Exception as exc:
         logger.error("Pexels search failed: %s", exc)
@@ -69,48 +187,54 @@ def search_pexels(query: str, orientation: str = "portrait", per_page: int = 3) 
 
 
 def pick_best_file(video: Dict) -> Optional[str]:
-    """Pick the best video file URL from Pexels result (prefer HD portrait)."""
+    """Pick the best video file URL (prefer HD portrait)."""
     files = video.get("video_files", [])
     if not files:
         return None
 
-    # Prefer: portrait, HD, smallest file that meets quality threshold
     portrait_files = [
         f for f in files
         if f.get("height", 0) >= MIN_HEIGHT and f.get("width", 0) >= MIN_WIDTH
     ]
-
     if not portrait_files:
-        # Fall back to any file
         portrait_files = files
 
-    # Sort by file size (smaller = faster download, still good quality)
     portrait_files.sort(key=lambda f: f.get("file_size", 999999999))
-
     return portrait_files[0].get("link")
 
 
 def download_clip(url: str, output_path: str) -> bool:
-    """Download a video clip to local path."""
+    """Download a video clip."""
     try:
         resp = requests.get(url, timeout=30, stream=True)
         if resp.status_code == 200:
             with open(output_path, "wb") as f:
                 for chunk in resp.iter_content(chunk_size=8192):
                     f.write(chunk)
-            size_mb = os.path.getsize(output_path) / (1024 * 1024)
-            logger.info("Downloaded clip: %s (%.1fMB)", output_path, size_mb)
             return True
-        else:
-            logger.error("Download failed: HTTP %s for %s", resp.status_code, url[:80])
-            return False
+        return False
     except Exception as exc:
         logger.error("Download error: %s", exc)
         return False
 
 
+def get_search_query(visual_intent: str, emotion: str = "neutral") -> str:
+    """Map visual_intent + emotion to a Pexels search query."""
+    queries = VISUAL_INTENT_MAP.get(visual_intent, DEFAULT_QUERIES)
+
+    # Add emotion modifier for certain emotions
+    query = random.choice(queries)
+
+    if emotion in ("shock", "urgency"):
+        query += " dramatic"
+    elif emotion == "reveal":
+        query += " cinematic"
+
+    return query
+
+
 class StockFetcher:
-    """Fetches stock footage for each scene in a topic's scene plan."""
+    """Fetches stock footage based on scene visual_intent and emotion."""
 
     def __init__(self):
         self.channel_config = _load_channel_config()
@@ -120,24 +244,32 @@ class StockFetcher:
             "clips_cached": 0,
             "clips_failed": 0,
         }
+        self._used_queries = set()  # Avoid duplicate clips
 
     def fetch_for_topic(self, scene_plan: Dict, assets_dir: str) -> List[str]:
-        """Fetch stock clips for each scene in a topic. Returns list of clip paths."""
-        channel = scene_plan.get("channel_id", "C1")
-        ch_config = self.channel_config.get(channel, {})
-        search_terms = ch_config.get("search_terms", ["abstract background"])
+        """Fetch stock clips for each scene using visual_intent."""
         scenes = scene_plan.get("scenes", [])
         clip_paths = []
 
+        if not PEXELS_API_KEY:
+            print("  ⚠️  PEXELS_API_KEY not set — using solid backgrounds")
+            return [""] * len(scenes)
+
         for scene in scenes:
             self.metrics["scenes_processed"] += 1
-            scene_num = scene.get("scene_number", 0)
-            scene_text = scene.get("text", "")
+            scene_num = scene.get("scene_id", scene.get("scene_number", 0))
+            visual_intent = scene.get("visual_intent", "cinematic_dark")
+            emotion = scene.get("emotion", "neutral")
 
-            # Build search query: channel term + key words from scene
-            words = scene_text.split()[:5]
-            scene_query = " ".join(words) if words else search_terms[0]
-            query = f"{search_terms[scene_num % len(search_terms)]} {scene_query}"
+            # Get search query from visual intent mapping
+            query = get_search_query(visual_intent, emotion)
+
+            # Avoid repeating same query across scenes
+            attempts = 0
+            while query in self._used_queries and attempts < 3:
+                query = get_search_query(visual_intent, emotion)
+                attempts += 1
+            self._used_queries.add(query)
 
             # Check cache
             cache_name = f"scene_{str(scene_num).zfill(2)}_{_cache_key(query)}.mp4"
@@ -149,26 +281,25 @@ class StockFetcher:
                 continue
 
             # Search Pexels
-            videos = search_pexels(query[:100])  # Pexels has query length limits
+            videos = search_pexels(query)
 
             if not videos:
-                # Fallback: try generic channel term
-                videos = search_pexels(search_terms[0])
+                # Fallback to default
+                videos = search_pexels(random.choice(DEFAULT_QUERIES))
 
             if videos:
-                url = pick_best_file(videos[0])
+                # Pick random from top results for variety
+                video = random.choice(videos[:3]) if len(videos) >= 3 else videos[0]
+                url = pick_best_file(video)
                 if url and download_clip(url, clip_path):
                     self.metrics["clips_downloaded"] += 1
                     clip_paths.append(clip_path)
+                    time.sleep(0.3)  # Rate limit
                     continue
 
-            # Last resort: use a solid color background (FFmpeg will generate)
             self.metrics["clips_failed"] += 1
-            clip_paths.append("")  # Empty = generate solid bg in video builder
-            logger.warning("No clip for scene %d of '%s'", scene_num, scene_plan.get("title", "")[:40])
-
-            # Rate limit: don't hammer Pexels
-            time.sleep(0.5)
+            clip_paths.append("")
+            time.sleep(0.3)
 
         return clip_paths
 
@@ -184,7 +315,6 @@ def main():
     scene_plan_dir = os.path.join(base_dir, "data", "scene_plans")
     assets_root = os.path.join(base_dir, "data", "shorts", "assets")
 
-    # Find all scene plan files
     scene_files = sorted(glob.glob(os.path.join(scene_plan_dir, "*", "*.json")))
     scene_files += sorted(glob.glob(os.path.join(scene_plan_dir, "*.json")))
 

@@ -1,9 +1,9 @@
 """
-Voice Generator — converts scene narration text to audio using Edge-TTS.
+Voice Generator — Edge-TTS with micro-pauses and scene-aware chunking.
 
-Free, unlimited, no API key required. Uses Microsoft Edge's TTS service.
-Reads scene plans from data/scene_plans/{date}/ (matching scene_splitter output).
-Generates MP3 audio files per scene.
+Reads narration from scene planner output (cleaned narration only).
+Generates per-scene MP3 audio. Inserts micro-pauses between scenes.
+Uses channel-specific voices for brand identity.
 """
 
 import asyncio
@@ -11,21 +11,24 @@ import glob
 import json
 import logging
 import os
+import subprocess
 import time
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# High-quality English voices for YouTube narration
-# Guy = deep male news voice, Jenny = clear female narrator
+# Channel-specific voices for brand identity
 VOICE_MAP = {
-    "C1": "en-US-GuyNeural",       # Tech/AI — authoritative male
+    "C1": "en-US-GuyNeural",       # Tech — authoritative male
     "C2": "en-US-JennyNeural",     # Finance — clear female
     "C3": "en-GB-RyanNeural",      # Science — British male
     "C4": "en-US-AriaNeural",      # Lifestyle — warm female
     "C5": "en-US-DavisNeural",     # Productivity — calm male
     "default": "en-US-GuyNeural",
 }
+
+# Micro-pause duration between scenes (seconds)
+SCENE_PAUSE_MS = 300
 
 
 class VoiceGeneratorWorker:
@@ -41,7 +44,6 @@ class VoiceGeneratorWorker:
         }
 
     def _load_scene_plans(self, path: str) -> List[Dict[str, Any]]:
-        """Load scene plans from a JSON file (may be a list of plans)."""
         try:
             with open(path) as f:
                 data = json.load(f)
@@ -51,36 +53,52 @@ class VoiceGeneratorWorker:
                 return [data]
             return []
         except Exception as exc:
-            logger.error("Failed to read scene plan %s: %s", path, exc)
+            logger.error("Failed to read %s: %s", path, exc)
             return []
 
-    async def _synthesize_audio(self, text: str, voice: str, output_path: str) -> bool:
-        """Generate audio using edge-tts."""
+    async def _synthesize_scene(self, text: str, voice: str, output_path: str) -> bool:
+        """Generate audio for a single scene narration chunk."""
         try:
             import edge_tts
-
             communicate = edge_tts.Communicate(text, voice)
             await communicate.save(output_path)
 
-            # Verify file was created and has content
             if os.path.exists(output_path) and os.path.getsize(output_path) > 100:
                 return True
-            else:
-                print(f"    ⚠️  File created but too small: {os.path.getsize(output_path) if os.path.exists(output_path) else 0} bytes")
-                return False
-
+            return False
         except Exception as exc:
-            print(f"    ❌ TTS Error: {type(exc).__name__}: {exc}")
-            logger.error("Edge-TTS failed: %s", exc)
+            print(f"    TTS Error: {type(exc).__name__}: {exc}")
             return False
 
+    def _add_silence_padding(self, audio_path: str, pause_ms: int = 300) -> bool:
+        """Add silence after audio file for natural pacing between scenes."""
+        padded = audio_path + ".padded.mp3"
+        try:
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", audio_path,
+                "-af", f"apad=pad_dur={pause_ms / 1000}",
+                "-c:a", "libmp3lame", "-b:a", "192k",
+                padded,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            if result.returncode == 0 and os.path.exists(padded):
+                os.replace(padded, audio_path)
+                return True
+            # Cleanup on failure
+            if os.path.exists(padded):
+                os.remove(padded)
+        except Exception:
+            if os.path.exists(padded):
+                os.remove(padded)
+        return False
+
     def _topic_output_dir(self, base_output: str, topic_id: str) -> str:
-        topic_dir = os.path.join(base_output, topic_id)
-        os.makedirs(topic_dir, exist_ok=True)
-        return topic_dir
+        d = os.path.join(base_output, topic_id)
+        os.makedirs(d, exist_ok=True)
+        return d
 
     def run(self) -> int:
-        """Run voice generation synchronously (wraps async internally)."""
         return asyncio.run(self._run_async())
 
     async def _run_async(self) -> int:
@@ -89,7 +107,6 @@ class VoiceGeneratorWorker:
         audio_root = os.path.join(base_dir, "data", "audio")
         os.makedirs(audio_root, exist_ok=True)
 
-        # Find scene plan files in both flat and date-subdirectory structures
         scene_files = sorted(glob.glob(os.path.join(scene_plan_dir, "*.json")))
         scene_files += sorted(glob.glob(os.path.join(scene_plan_dir, "*", "*.json")))
 
@@ -98,7 +115,7 @@ class VoiceGeneratorWorker:
             return 0
 
         print(f"Found {len(scene_files)} scene plan files...")
-        print(f"Using Edge-TTS (free, unlimited) 🎙️\n")
+        print(f"Using Edge-TTS (free, unlimited)\n")
 
         for plan_path in scene_files:
             plans = self._load_scene_plans(plan_path)
@@ -109,15 +126,12 @@ class VoiceGeneratorWorker:
 
                 title = plan.get("title", "unknown")
                 channel = plan.get("channel_id", "XX")
-
-                # Pick voice based on channel
                 voice = VOICE_MAP.get(channel, VOICE_MAP["default"])
 
-                # Create filesystem-safe topic ID
                 safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in title)[:50].strip().replace(" ", "_")
                 topic_id = f"{channel}_{safe_title}"
 
-                scenes: List[Dict[str, Any]] = plan.get("scenes") or []
+                scenes = plan.get("scenes") or []
                 if not scenes:
                     continue
 
@@ -129,14 +143,15 @@ class VoiceGeneratorWorker:
                 self.metrics["total_estimated_duration_sec"] += topic_duration
 
                 topic_dir = self._topic_output_dir(audio_root, topic_id)
-                print(f"  🎙️ '{title[:60]}' ({len(scenes)} scenes, voice={voice})")
+                print(f"  '{title[:60]}' ({len(scenes)} scenes, {voice})")
 
                 for idx, scene in enumerate(scenes, start=1):
+                    # Read from narration (scene_planner) or text (legacy splitter)
                     narration = (scene.get("narration") or scene.get("text") or "").strip()
                     if not narration:
                         continue
 
-                    scene_num = scene.get("scene_number") or scene.get("scene_id") or idx
+                    scene_num = scene.get("scene_id") or scene.get("scene_number") or idx
                     filename = f"scene_{str(scene_num).zfill(2)}.mp3"
                     output_path = os.path.join(topic_dir, filename)
 
@@ -147,38 +162,36 @@ class VoiceGeneratorWorker:
                         continue
 
                     start_time = time.time()
-                    success = await self._synthesize_audio(narration, voice, output_path)
+                    success = await self._synthesize_scene(narration, voice, output_path)
                     elapsed = round(time.time() - start_time, 2)
 
                     if success:
+                        # Add micro-pause after each scene (except last)
+                        if idx < len(scenes):
+                            self._add_silence_padding(output_path, SCENE_PAUSE_MS)
+
                         self.metrics["scenes_generated"] += 1
                         self.metrics["scene_generation_times"].append(elapsed)
                         size_kb = os.path.getsize(output_path) / 1024
-                        print(f"    ✅ scene_{str(scene_num).zfill(2)}.mp3 ({size_kb:.0f}KB, {elapsed}s)")
+                        print(f"    scene_{str(scene_num).zfill(2)}.mp3 ({size_kb:.0f}KB, {elapsed}s)")
                     else:
                         self.metrics["scenes_failed"] += 1
-                        print(f"    ❌ scene_{str(scene_num).zfill(2)}.mp3 FAILED")
 
         self._log_metrics()
-        generated = self.metrics["scenes_generated"]
-        total = self.metrics["scenes_total"]
-        print(f"\nAudio files generated: {generated}/{total}")
-        return generated
+        g = self.metrics["scenes_generated"]
+        t = self.metrics["scenes_total"]
+        print(f"\nAudio: {g}/{t}")
+        return g
 
     def _log_metrics(self) -> None:
         print("\n--- Voice Generator Metrics ---")
-        for key, value in self.metrics.items():
-            if key == "scene_generation_times" and value:
-                avg_time = sum(value) / len(value)
-                print(f"  avg_generation_time: {avg_time:.2f}s")
-                print(f"  total_scenes_attempted: {len(value)}")
-                print(f"  min_time: {min(value):.2f}s")
-                print(f"  max_time: {max(value):.2f}s")
-            elif key not in {"scene_generation_times"}:
-                print(f"{key}: {value}")
+        for k, v in self.metrics.items():
+            if k == "scene_generation_times" and v:
+                print(f"  avg_time: {sum(v) / len(v):.2f}s")
+            elif k != "scene_generation_times":
+                print(f"{k}: {v}")
         print("--------------------------------\n")
 
 
 if __name__ == "__main__":
-    worker = VoiceGeneratorWorker()
-    worker.run()
+    VoiceGeneratorWorker().run()

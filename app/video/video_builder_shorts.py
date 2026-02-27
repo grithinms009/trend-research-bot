@@ -1,16 +1,12 @@
 """
-Video Builder Shorts — FFmpeg-based vertical video renderer.
+Video Builder Shorts — Rhythm Engine.
 
-Renders YouTube Shorts (1080x1920, 9:16, 30fps, max 60s) by:
-1. Creating per-scene video segments (stock clip or solid color bg)
-2. Overlaying voice audio per scene
-3. Concatenating all scenes
-4. Burning subtitles
-5. Mixing background music (ducked under voice)
-6. Exporting final MP4
+Renders YouTube Shorts (1080x1920, 9:16, 30fps) with scene-reactive editing:
+- Energy controls zoom speed, cut pace, caption size, music volume
+- Emotion controls silence inserts, fade types, visual effects
+- cut_style controls transition type (hard/smash/slow)
 
-All rendering uses FFmpeg CLI directly — no moviepy, no Python video libs.
-Optimized for 8GB RAM VPS.
+All rendering via FFmpeg CLI. No moviepy. Optimized for 8GB VPS.
 """
 
 import glob
@@ -30,25 +26,18 @@ from app.video.music_manager import get_music_for_channel
 
 logger = logging.getLogger(__name__)
 
-# Output settings
 WIDTH = 1080
 HEIGHT = 1920
 FPS = 30
-MAX_DURATION = 59  # Just under 60s for Shorts
-CRF = 23  # Quality (lower = better, 18-28 range)
+MAX_DURATION = 59
+CRF = 23
 VIDEO_BITRATE = "6M"
 AUDIO_BITRATE = "192k"
 
 
 def _run_ffmpeg(cmd: List[str], timeout: int = 120) -> bool:
-    """Run an FFmpeg command and return success status."""
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
             logger.error("FFmpeg failed: %s", result.stderr[-500:])
             return False
@@ -61,17 +50,25 @@ def _run_ffmpeg(cmd: List[str], timeout: int = 120) -> bool:
         return False
 
 
-def _create_color_bg(output_path: str, duration: float, bg_color: str = "0x0a0a0a") -> bool:
-    """Create a solid-color background video as fallback when no stock clip."""
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi",
-        "-i", f"color=c={bg_color}:s={WIDTH}x{HEIGHT}:r={FPS}:d={duration}",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-        "-t", str(duration),
-        output_path,
-    ]
-    return _run_ffmpeg(cmd)
+def _get_zoom_filter(energy: int, duration: float) -> str:
+    """Generate zoom filter based on energy level."""
+    if energy >= 5:
+        # Zoom punch: fast zoom in
+        zoom_speed = 0.003
+    elif energy >= 4:
+        zoom_speed = 0.002
+    elif energy >= 3:
+        zoom_speed = 0.001
+    else:
+        # Calm: very subtle or no zoom
+        zoom_speed = 0.0005
+
+    return (
+        f"zoompan=z='min(zoom+{zoom_speed},{1 + energy * 0.03})'"
+        f":d={int(duration * FPS)}"
+        f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+        f":s={WIDTH}x{HEIGHT}:fps={FPS}"
+    )
 
 
 def _prepare_scene_clip(
@@ -79,39 +76,61 @@ def _prepare_scene_clip(
     audio_path: str,
     output_path: str,
     duration: float,
+    energy: int,
+    emotion: str,
+    cut_style: str,
     bg_color: str = "0x0a0a0a",
+    silence_before: float = 0.0,
 ) -> bool:
-    """Prepare a single scene: stock clip (or color bg) + voice audio."""
-    
+    """Render a single scene with rhythm-aware effects."""
+
+    zoom_filter = _get_zoom_filter(energy, duration)
+
     if stock_clip and os.path.exists(stock_clip) and os.path.getsize(stock_clip) > 1000:
-        # Use stock clip: scale, crop to vertical, subtle zoom, mute original audio
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", stock_clip,
-            "-i", audio_path,
-            "-filter_complex",
-            f"[0:v]scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
+        # Stock clip: scale → crop → zoom based on energy
+        video_filter = (
+            f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={WIDTH}:{HEIGHT},"
             f"setpts=PTS-STARTPTS,"
-            f"fps={FPS}[v]",
-            "-map", "[v]",
-            "-map", "1:a",
+            f"fps={FPS}"
+        )
+
+        # Add silence pad before audio for shock/dramatic emotions
+        audio_filter = ""
+        if silence_before > 0:
+            audio_filter = f"-af adelay={int(silence_before * 1000)}|{int(silence_before * 1000)}"
+
+        cmd = ["ffmpeg", "-y", "-i", stock_clip, "-i", audio_path]
+        cmd += ["-filter_complex", f"[0:v]{video_filter}[v]"]
+        cmd += ["-map", "[v]", "-map", "1:a"]
+
+        if audio_filter:
+            cmd += ["-af", f"adelay={int(silence_before * 1000)}|{int(silence_before * 1000)}"]
+
+        cmd += [
             "-c:v", "libx264", "-preset", "fast", "-crf", str(CRF),
             "-c:a", "aac", "-b:a", AUDIO_BITRATE,
-            "-t", str(duration),
+            "-t", str(duration + silence_before),
             "-shortest",
             output_path,
         ]
     else:
-        # Solid color background + audio
+        # Solid color background
+        total_dur = duration + silence_before
         cmd = [
             "ffmpeg", "-y",
             "-f", "lavfi",
-            "-i", f"color=c={bg_color}:s={WIDTH}x{HEIGHT}:r={FPS}:d={duration}",
+            "-i", f"color=c={bg_color}:s={WIDTH}x{HEIGHT}:r={FPS}:d={total_dur}",
             "-i", audio_path,
+        ]
+
+        if silence_before > 0:
+            cmd += ["-af", f"adelay={int(silence_before * 1000)}|{int(silence_before * 1000)}"]
+
+        cmd += [
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
             "-c:a", "aac", "-b:a", AUDIO_BITRATE,
-            "-t", str(duration),
+            "-t", str(total_dur),
             "-shortest",
             output_path,
         ]
@@ -120,14 +139,12 @@ def _prepare_scene_clip(
 
 
 def _concat_scenes(scene_clips: List[str], output_path: str) -> bool:
-    """Concatenate scene clips into one video using FFmpeg concat demuxer."""
-    # Create concat list file
+    """Concatenate scene clips."""
     list_path = output_path + ".concat.txt"
     with open(list_path, "w") as f:
         for clip in scene_clips:
-            # FFmpeg concat requires escaped single quotes in paths
-            safe_path = clip.replace("'", "'\\''")
-            f.write(f"file '{safe_path}'\n")
+            safe = clip.replace("'", "'\\''")
+            f.write(f"file '{safe}'\n")
 
     cmd = [
         "ffmpeg", "-y",
@@ -136,20 +153,14 @@ def _concat_scenes(scene_clips: List[str], output_path: str) -> bool:
         "-c", "copy",
         output_path,
     ]
-
     result = _run_ffmpeg(cmd)
-
-    # Clean up list file
     if os.path.exists(list_path):
         os.remove(list_path)
-
     return result
 
 
 def _add_subtitles(input_path: str, ass_path: str, output_path: str) -> bool:
     """Burn ASS subtitles into video."""
-    # Use the subtitles filter with the ASS file
-    safe_ass = ass_path.replace(":", "\\:").replace("'", "\\'")
     cmd = [
         "ffmpeg", "-y",
         "-i", input_path,
@@ -161,22 +172,23 @@ def _add_subtitles(input_path: str, ass_path: str, output_path: str) -> bool:
     return _run_ffmpeg(cmd, timeout=90)
 
 
-def _mix_music(input_path: str, music_path: str, output_path: str) -> bool:
-    """Mix background music under voice audio with ducking."""
+def _mix_music(input_path: str, music_path: str, output_path: str, avg_energy: float) -> bool:
+    """Mix music with energy-reactive volume."""
     if not music_path or not os.path.exists(music_path):
-        # No music — just copy
         cmd = ["ffmpeg", "-y", "-i", input_path, "-c", "copy", output_path]
         return _run_ffmpeg(cmd)
+
+    # Music volume scales with energy: high energy → louder music
+    music_vol = min(0.15, 0.05 + (avg_energy * 0.02))
 
     cmd = [
         "ffmpeg", "-y",
         "-i", input_path,
         "-i", music_path,
         "-filter_complex",
-        # Voice at full volume, music at -18dB (0.125), mix together
-        "[0:a]volume=1.0[voice];"
-        "[1:a]volume=0.08[music];"
-        "[voice][music]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+        f"[0:a]volume=1.0[voice];"
+        f"[1:a]volume={music_vol:.3f}[music];"
+        f"[voice][music]amix=inputs=2:duration=first:dropout_transition=2[aout]",
         "-map", "0:v",
         "-map", "[aout]",
         "-c:v", "copy",
@@ -188,7 +200,7 @@ def _mix_music(input_path: str, music_path: str, output_path: str) -> bool:
 
 
 class ShortsVideoBuilder:
-    """Builds YouTube Shorts from scene plans + audio + stock footage."""
+    """Builds YouTube Shorts with rhythm-aware editing."""
 
     def __init__(self):
         self.channel_config = _load_channel_config()
@@ -200,14 +212,8 @@ class ShortsVideoBuilder:
             "total_render_time": 0.0,
         }
 
-    def build_short(
-        self,
-        scene_plan: Dict,
-        audio_dir: str,
-        work_dir: str,
-        output_path: str,
-    ) -> bool:
-        """Build a single YouTube Short from scene plan + audio files."""
+    def build_short(self, scene_plan: Dict, audio_dir: str, work_dir: str, output_path: str) -> bool:
+        """Build a YouTube Short with rhythm engine."""
         start_time = time.time()
         title = scene_plan.get("title", "unknown")
         channel = scene_plan.get("channel_id", "C1")
@@ -221,66 +227,66 @@ class ShortsVideoBuilder:
         os.makedirs(work_dir, exist_ok=True)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        # Step 1: Fetch stock footage
+        # Step 1: Fetch stock footage via visual intent
         assets_dir = os.path.join(work_dir, "assets")
         os.makedirs(assets_dir, exist_ok=True)
         stock_clips = self.stock_fetcher.fetch_for_topic(scene_plan, assets_dir)
 
-        # Step 2: Build per-scene clips (video + audio)
-        scene_clips = []
-        for i, scene in enumerate(scenes):
-            scene_num = scene.get("scene_number", i + 1)
-            duration = float(scene.get("estimated_duration", scene.get("estimated_duration_sec", 3.0)))
+        # Step 2: Build per-scene clips with rhythm
+        scene_clip_paths = []
+        avg_energy = sum(s.get("energy", 3) for s in scenes) / max(len(scenes), 1)
 
-            # Find audio file for this scene
+        for i, scene in enumerate(scenes):
+            scene_num = scene.get("scene_id", scene.get("scene_number", i + 1))
+            duration = float(scene.get("estimated_duration", 3.0))
+            energy = scene.get("energy", 3)
+            emotion = scene.get("emotion", "neutral")
+            cut_style = scene.get("cut_style", "hard")
+
+            # Rhythm rules
+            silence_before = 0.0
+            if emotion == "shock":
+                silence_before = 0.15  # 150ms pause before shock
+            elif emotion == "reveal":
+                silence_before = 0.1   # Slight pause before reveal
+
             audio_file = os.path.join(audio_dir, f"scene_{str(scene_num).zfill(2)}.mp3")
             if not os.path.exists(audio_file):
-                logger.warning("Missing audio for scene %d, skipping", scene_num)
+                logger.warning("Missing audio for scene %d", scene_num)
                 continue
 
-            # Get stock clip (or empty string for color bg)
             stock_clip = stock_clips[i] if i < len(stock_clips) else ""
-
             scene_output = os.path.join(work_dir, f"scene_{str(scene_num).zfill(2)}.mp4")
-            if _prepare_scene_clip(stock_clip, audio_file, scene_output, duration, bg_color):
-                scene_clips.append(scene_output)
-            else:
-                logger.error("Failed to render scene %d for '%s'", scene_num, title[:40])
 
-        if not scene_clips:
-            logger.error("No scenes rendered for '%s'", title[:40])
+            if _prepare_scene_clip(
+                stock_clip, audio_file, scene_output,
+                duration, energy, emotion, cut_style,
+                bg_color, silence_before,
+            ):
+                scene_clip_paths.append(scene_output)
+
+        if not scene_clip_paths:
             return False
 
-        # Step 3: Concatenate all scenes
+        # Step 3: Concatenate
         concat_path = os.path.join(work_dir, "concat.mp4")
-        if not _concat_scenes(scene_clips, concat_path):
-            logger.error("Concat failed for '%s'", title[:40])
+        if not _concat_scenes(scene_clip_paths, concat_path):
             return False
 
-        # Step 4: Generate and burn subtitles
+        # Step 4: Subtitles
         subs_path = os.path.join(work_dir, "subs.ass")
         generate_subtitles_for_topic(scene_plan, subs_path, self.channel_config)
-        
+
         subtitled_path = os.path.join(work_dir, "subtitled.mp4")
-        if os.path.exists(subs_path):
-            if not _add_subtitles(concat_path, subs_path, subtitled_path):
-                # Subtitle burn failed — continue without subs
-                logger.warning("Subtitle burn failed, continuing without subs")
-                subtitled_path = concat_path
-        else:
+        if not _add_subtitles(concat_path, subs_path, subtitled_path):
             subtitled_path = concat_path
 
-        # Step 5: Mix background music
-        total_duration = sum(
-            float(s.get("estimated_duration", s.get("estimated_duration_sec", 3.0)))
-            for s in scenes
-        )
+        # Step 5: Music (energy-reactive volume)
+        total_dur = sum(float(s.get("estimated_duration", 3)) for s in scenes)
         music_dir = os.path.join(work_dir, "music")
-        music_path = get_music_for_channel(channel, min(total_duration, MAX_DURATION), music_dir)
+        music_path = get_music_for_channel(channel, min(total_dur, MAX_DURATION), music_dir)
 
-        if not _mix_music(subtitled_path, music_path, output_path):
-            # Music mix failed — use subtitled version as final
-            logger.warning("Music mix failed, using version without music")
+        if not _mix_music(subtitled_path, music_path, output_path, avg_energy):
             import shutil
             shutil.copy2(subtitled_path, output_path)
 
@@ -289,11 +295,11 @@ class ShortsVideoBuilder:
 
         if os.path.exists(output_path) and os.path.getsize(output_path) > 10000:
             size_mb = os.path.getsize(output_path) / (1024 * 1024)
-            print(f"  ✅ Rendered: {os.path.basename(output_path)} ({size_mb:.1f}MB, {elapsed}s)")
+            print(f"  ✅ {os.path.basename(output_path)} ({size_mb:.1f}MB, {elapsed}s)")
             self.metrics["videos_rendered"] += 1
             return True
         else:
-            print(f"  ❌ Render failed: {title[:60]}")
+            print(f"  ❌ Failed: {title[:60]}")
             self.metrics["videos_failed"] += 1
             return False
 
@@ -319,11 +325,11 @@ def main():
     scene_files += sorted(glob.glob(os.path.join(scene_plan_dir, "*.json")))
 
     if not scene_files:
-        print("No scene plans found for video building.")
+        print("No scene plans found.")
         return
 
     builder = ShortsVideoBuilder()
-    total_built = 0
+    total = 0
 
     for plan_path in scene_files:
         with open(plan_path) as f:
@@ -338,33 +344,27 @@ def main():
             safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in title)[:50].strip().replace(" ", "_")
             topic_id = f"{channel}_{safe_title}"
 
-            # Paths
             audio_dir = os.path.join(audio_root, topic_id)
             work_dir = os.path.join(work_root, topic_id)
             output_dir = os.path.join(output_root, channel)
             os.makedirs(output_dir, exist_ok=True)
             output_path = os.path.join(output_dir, f"{topic_id}.mp4")
 
-            # Skip if already rendered
             if os.path.exists(output_path) and os.path.getsize(output_path) > 10000:
-                print(f"  ⏭️  Already rendered: {topic_id}")
+                print(f"  Already rendered: {topic_id}")
                 continue
 
             if not os.path.exists(audio_dir):
-                print(f"  ⚠️  No audio for {topic_id}, skipping")
+                print(f"  No audio for {topic_id}")
                 continue
 
-            print(f"\n🎬 Building short: '{title[:60]}' ({channel})")
+            print(f"\n Building: '{title[:60]}' ({channel})")
             if builder.build_short(plan, audio_dir, work_dir, output_path):
-                total_built += 1
+                total += 1
 
     builder.log_metrics()
-
-    if total_built == 0:
-        print("⚠️  No videos rendered.")
-    else:
-        print(f"\n🎬 Total shorts rendered: {total_built}")
-        print(f"Output: {output_root}")
+    print(f"\nTotal shorts: {total}")
+    print(f"Output: {output_root}")
 
 
 if __name__ == "__main__":

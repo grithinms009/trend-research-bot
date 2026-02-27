@@ -12,6 +12,14 @@ channels:
     bg_color: "#0a0a0a"
     accent_color: "#7B2FFF"
     search_terms: ["technology abstract", "computer code", "robot ai", "digital network", "circuit board"]
+    creative:
+      tone: urgent_factual
+      caption_style: bold_impact
+      music_energy: high
+      color_grade: cool_dark
+      pacing_bias: fast
+      default_emotion: tension
+      voice: "en-US-GuyNeural"
   C2:
     name: "Daily Market Bites"
     category: "Finance"
@@ -25,6 +33,14 @@ channels:
     bg_color: "#0d1117"
     accent_color: "#FF4444"
     search_terms: ["stock market", "finance business", "money investment", "city skyline", "trading"]
+    creative:
+      tone: authoritative
+      caption_style: clean_data
+      music_energy: medium
+      color_grade: neutral_sharp
+      pacing_bias: medium
+      default_emotion: urgency
+      voice: "en-US-JennyNeural"
   C3:
     name: "Did You Know"
     category: "History/Science"
@@ -38,6 +54,14 @@ channels:
     bg_color: "#1a1a2e"
     accent_color: "#E94560"
     search_terms: ["science laboratory", "space stars", "ancient ruins", "nature landscape", "ocean deep"]
+    creative:
+      tone: mysterious_storyteller
+      caption_style: dramatic_reveal
+      music_energy: low
+      color_grade: warm_cinematic
+      pacing_bias: slow
+      default_emotion: curiosity
+      voice: "en-GB-RyanNeural"
   C4:
     name: "Luxury / Travel Top 5"
     category: "Luxury/Travel"
@@ -51,6 +75,14 @@ channels:
     bg_color: "#1c1c1c"
     accent_color: "#D4AF37"
     search_terms: ["luxury hotel", "tropical beach", "yacht ocean", "luxury car", "resort pool"]
+    creative:
+      tone: aspirational
+      caption_style: elegant_minimal
+      music_energy: medium
+      color_grade: warm_bright
+      pacing_bias: slow
+      default_emotion: reveal
+      voice: "en-US-AriaNeural"
   C5:
     name: "Life Hacks / Productivity"
     category: "Productivity"
@@ -64,3 +96,11 @@ channels:
     bg_color: "#f5f5f5"
     accent_color: "#4ECDC4"
     search_terms: ["desk workspace", "morning routine", "writing notebook", "minimalist", "coffee work"]
+    creative:
+      tone: calm_authoritative
+      caption_style: clean_modern
+      music_energy: low
+      color_grade: bright_clean
+      pacing_bias: medium
+      default_emotion: neutral
+      voice: "en-US-DavisNeural"
