@@ -35,7 +35,7 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(PROJECT_ROOT)
 
 # ==================== PRODUCTION PIPELINE ====================
-# 10 stages — no duplicates, no LLM scene planner
+# 13 stages — full shorts pipeline
 PIPELINE = [
     "app.scraper.topic_scraper",
     "app.scraper.topic_cleaner",
@@ -48,6 +48,9 @@ PIPELINE = [
     "app.workers.topic_script_generator",
     "app.workers.scene_splitter",
     "app.workers.voice_generator",
+    # --- VIDEO PIPELINE ---
+    "app.video.video_builder_shorts",
+    "app.video.cleanup",
 ]
 
 # Validator is the halt-check stage
@@ -66,6 +69,8 @@ STAGE_DATA_DIRS = {
     "app.workers.topic_script_generator": ("data/topic_scripts", "generated"),
     "app.workers.scene_splitter": ("data/scene_plans", "scene_split"),
     "app.workers.voice_generator": ("data/audio", "audio"),
+    "app.video.video_builder_shorts": ("data/shorts/final", "video"),
+    "app.video.cleanup": ("", "cleanup"),
 }
 
 stage_metrics = {}
