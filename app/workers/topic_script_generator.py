@@ -57,10 +57,20 @@ class TopicScriptGenerator:
             "generation_times": [],
         }
 
-    def _build_prompt(self, title: str, article_text: str) -> str:
+    def _build_prompt(self, title: str, article_text: str,
+                       hook: str = "", angle: str = "") -> str:
         """Build tension-driven YouTube Shorts script prompt. No labels, pure narration."""
+        hook_guidance = ""
+        if hook:
+            hook_guidance = f"\nSUGGESTED HOOK (use this energy, but rewrite in your own words): {hook}\n"
+        angle_guidance = ""
+        if angle:
+            angle_guidance = f"UNIQUE ANGLE: {angle}\n"
+
         return (
             f"Write a 45-second YouTube Shorts narration about: {title}\n\n"
+            f"{hook_guidance}"
+            f"{angle_guidance}"
             "STRUCTURE (follow exactly, but do NOT label sections):\n"
             "1. HOOK — First 2 sentences. Create instant curiosity or shock. Make them stop scrolling.\n"
             "2. ESCALATION — Build tension. Layer facts that raise stakes.\n"
@@ -71,7 +81,7 @@ class TopicScriptGenerator:
             "- Output ONLY the narration. Nothing else.\n"
             "- NO section labels. No 'Hook:', 'Title:', 'Paragraph:', 'Scene:' etc.\n"
             "- NO markdown. No bullets. No numbered lists. No emojis. No asterisks.\n"
-            "- NO generic intros like 'In recent developments', 'Recently', 'In today's news'.\n"
+            "- NO generic intros like 'In recent developments', 'Recently', 'In today\'s news'.\n"
             "- Total: 130-170 words. No less. No more.\n"
             "- Separate each section with ONE blank line.\n"
             "- Short punchy sentences. Dramatic pauses. Active voice only.\n"
@@ -104,7 +114,10 @@ class TopicScriptGenerator:
 
         cid = request.get("channel_id")
         topic = request.get("topic", {})
-        title = topic.get("title", "Unknown Topic")
+        # Prefer youtube_title from intelligence engine, fall back to raw title
+        title = request.get("youtube_title") or topic.get("youtube_title") or topic.get("title", "Unknown Topic")
+        hook = request.get("hook") or topic.get("hook", "")
+        angle = request.get("angle") or topic.get("angle", "")
         model = request.get("model", "mistral:latest")
         tone = request.get("tone", "neutral")
         article_text = (topic.get("article_text") or "").strip()
@@ -123,7 +136,7 @@ class TopicScriptGenerator:
         print(f"Generating {tone} script for {cid} using {model}...")
 
         # ========== FIRST ATTEMPT ==========
-        prompt = self._build_prompt(title, article_text)
+        prompt = self._build_prompt(title, article_text, hook=hook, angle=angle)
         script_text = OllamaClient.generate_with_retry(
             prompt,
             model=model,
@@ -221,6 +234,9 @@ class TopicScriptGenerator:
             "generation_time_seconds": gen_time,
             "generated_at": datetime.now().isoformat(),
             "source_url": url,
+            "hook": hook,
+            "angle": angle,
+            "engagement_score": request.get("engagement_score", 0),
             "source_topic": topic,
         }
         return script

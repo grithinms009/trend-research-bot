@@ -4,6 +4,12 @@ Scene Planner — LLM-based scene planner with emotion, energy, and visual inten
 Replaces the deterministic scene_splitter. Each scene gets rich metadata
 for the rhythm engine, visual intent engine, and caption engine.
 
+v2 enhancements:
+- Per-sentence visual prompt generation (3 diverse prompts per scene)
+- Visual diversity integration to prevent repetitive footage
+- Richer visual_intent taxonomy
+- Style mood tagging for downstream color grading
+
 Uses Ollama to break narration into emotionally-tagged scenes.
 Falls back to deterministic splitting if LLM fails.
 """
@@ -17,12 +23,101 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from app.services.ollama_client import OllamaClient
+from app.video.visual_diversity import VisualDiversityEngine
 
 logger = logging.getLogger(__name__)
 
 # Valid values for scene metadata
 VALID_EMOTIONS = {"shock", "tension", "reveal", "neutral", "dramatic", "curiosity", "urgency"}
 VALID_CUT_STYLES = {"hard", "smash", "slow"}
+
+# ============================================================
+# VISUAL PROMPT TEMPLATES — per-sentence visual suggestions
+# Maps visual_intent + emotion to 3 diverse stock search prompts
+# ============================================================
+VISUAL_PROMPT_MAP = {
+    ("abstract_tension", "shock"): [
+        "dramatic red warning light flashing dark room",
+        "abstract glitch distortion digital",
+        "dark corridor emergency lights cinematic",
+    ],
+    ("abstract_tension", "tension"): [
+        "dark moody atmospheric fog",
+        "clock ticking extreme close up",
+        "shadowy figure silhouette dramatic lighting",
+    ],
+    ("tech_ui", "shock"): [
+        "futuristic holographic alert system",
+        "server room red warning lights",
+        "cybersecurity breach screen visualization",
+    ],
+    ("tech_ui", "neutral"): [
+        "modern dashboard data analytics screen",
+        "AI neural network visualization blue",
+        "typing on laptop code editor close up",
+    ],
+    ("data_visualization", "urgency"): [
+        "stock market crash red graph dramatic",
+        "financial data scrolling screen fast",
+        "numbers falling digital rain cinematic",
+    ],
+    ("nature", "curiosity"): [
+        "deep ocean bioluminescence dark water",
+        "macro shot crystal formation geological",
+        "aurora borealis timelapse night sky",
+    ],
+    ("nature", "reveal"): [
+        "sunrise over mountain peak golden hour",
+        "underwater cave light beam dramatic",
+        "volcano eruption aerial dramatic cinematic",
+    ],
+    ("urban", "dramatic"): [
+        "city skyline storm clouds dramatic",
+        "neon signs rain night cinematic",
+        "aerial traffic timelapse city night",
+    ],
+    ("luxury", "reveal"): [
+        "luxury penthouse panoramic view sunset",
+        "supercar driving coastal road aerial",
+        "private yacht ocean aerial golden hour",
+    ],
+    ("money", "shock"): [
+        "gold vault door opening cinematic",
+        "cash money scattered dramatic lighting",
+        "cryptocurrency chart explosion green red",
+    ],
+    ("building", "tension"): [
+        "government building dramatic low angle",
+        "courthouse steps cinematic fog",
+        "corporate tower reflecting storm clouds",
+    ],
+    ("cinematic_dark", "dramatic"): [
+        "dark cinematic smoke swirling slow motion",
+        "dramatic spotlight single beam darkness",
+        "abstract dark liquid flowing cinematic",
+    ],
+    ("timeline", "curiosity"): [
+        "ancient manuscript close up candlelight",
+        "hourglass sand falling macro dramatic",
+        "old photographs fading memory effect",
+    ],
+    ("document", "neutral"): [
+        "legal document signing close up dramatic",
+        "newspaper headline zoom dramatic",
+        "official papers desk professional lighting",
+    ],
+}
+
+# Default visual prompts when no specific mapping exists
+DEFAULT_VISUAL_PROMPTS = {
+    "shock": ["dramatic impact flash dark", "abstract motion blur intense", "close up eye reaction dramatic"],
+    "tension": ["dark atmospheric fog corridor", "ticking clock mechanism macro", "shadow light contrast cinematic"],
+    "reveal": ["light breaking through darkness", "curtain opening dramatic", "door opening bright light"],
+    "neutral": ["abstract soft motion background", "clean modern interior", "atmospheric clouds calm"],
+    "dramatic": ["cinematic slow motion particles", "epic landscape aerial dramatic", "storm clouds timelapse"],
+    "curiosity": ["mysterious light fog forest", "keyhole light dramatic", "question mark abstract neon"],
+    "urgency": ["fast motion blur city", "countdown timer dramatic", "emergency lights flashing"],
+}
 
 SCENE_PLANNER_PROMPT = """Break this narration into 4-6 short scenes for a YouTube Short.
 
@@ -162,10 +257,28 @@ def _parse_llm_scenes(raw_output: str, narration: str) -> Optional[List[Dict]]:
     return validated if len(validated) >= 2 else None
 
 
+def _generate_visual_prompts(scene: Dict) -> List[str]:
+    """Generate 3 diverse visual search prompts for a scene based on intent + emotion."""
+    intent = scene.get("visual_intent", "cinematic_dark")
+    emotion = scene.get("emotion", "neutral")
+
+    # Try specific mapping first
+    key = (intent, emotion)
+    if key in VISUAL_PROMPT_MAP:
+        return list(VISUAL_PROMPT_MAP[key])
+
+    # Try emotion-only fallback
+    if emotion in DEFAULT_VISUAL_PROMPTS:
+        return list(DEFAULT_VISUAL_PROMPTS[emotion])
+
+    return ["abstract cinematic background dark", "atmospheric motion blur", "dramatic light shadow"]
+
+
 class ScenePlannerWorker:
-    """LLM-based scene planner with emotion/energy metadata."""
+    """LLM-based scene planner with emotion/energy metadata and visual diversity."""
 
     def __init__(self):
+        self.diversity_engine = VisualDiversityEngine()
         self.metrics = {
             "scripts_processed": 0,
             "scenes_created": 0,
@@ -174,6 +287,7 @@ class ScenePlannerWorker:
             "fallback_used": 0,
             "total_duration": 0.0,
             "planning_times": [],
+            "visual_prompts_generated": 0,
         }
 
     def plan_scenes(self, narration: str, model: str = "mistral:latest") -> List[Dict]:
@@ -202,7 +316,7 @@ class ScenePlannerWorker:
         return _deterministic_fallback(narration)
 
     def process_scripts(self, scripts_dir: str, output_dir: str) -> int:
-        """Process all cleaned script files and output scene plans."""
+        """Process all cleaned script files and output scene plans with visual diversity."""
         os.makedirs(output_dir, exist_ok=True)
         total = 0
 
@@ -234,11 +348,26 @@ class ScenePlannerWorker:
                 if not scenes:
                     continue
 
+                # Generate unique video ID for diversity tracking
+                title = script.get("title", "Unknown")
+                safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in title)[:50]
+                video_id = f"{channel_id}_{safe_title}"
+
+                # Apply visual diversity — rotate styles, diversify intents
+                scenes = self.diversity_engine.diversify_scenes(
+                    scenes, channel_id.upper(), video_id
+                )
+
+                # Generate per-scene visual prompts (3 per scene)
+                for scene in scenes:
+                    scene["visual_prompts"] = _generate_visual_prompts(scene)
+                    self.metrics["visual_prompts_generated"] += len(scene["visual_prompts"])
+
                 total_duration = sum(s["estimated_duration"] for s in scenes)
 
                 scene_plan = {
                     "channel_id": channel_id.upper(),
-                    "title": script.get("title", "Unknown"),
+                    "title": title,
                     "total_scenes": len(scenes),
                     "total_estimated_duration": round(total_duration, 2),
                     "scenes": scenes,
@@ -269,6 +398,7 @@ class ScenePlannerWorker:
             elif key != "planning_times":
                 print(f"{key}: {value}")
         print("-----------------------------\n")
+        self.diversity_engine.log_metrics()
 
 
 def main():

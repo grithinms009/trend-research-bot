@@ -16,6 +16,7 @@ QUEUE_DIR = os.path.join(DATA_DIR, "topic_queue")
 # weights for priority scoring
 TREND_WEIGHT = 1.0
 FRESHNESS_WEIGHT = 0.5  # newer topics get a boost
+ENGAGEMENT_WEIGHT = 0.8  # v2: engagement score from intelligence engine
 COMPETITION_WEIGHT = -0.3  # optional placeholder if you add competition scoring
 
 # ensure output folder exists
@@ -44,6 +45,16 @@ def compute_priority(cluster):
         age_hours = (datetime.now(timezone.utc) - newest).total_seconds() / 3600
         freshness_score = max(0.0, 24 - age_hours) / 24  # 0-1 scale, more recent = higher
         score += freshness_score * FRESHNESS_WEIGHT
+
+    # v2: factor in engagement scores from intelligence engine
+    engagement_scores = [
+        t.get("engagement_score", 0)
+        for t in cluster.get("topics", [])
+        if t.get("engagement_score", 0) > 0
+    ]
+    if engagement_scores:
+        avg_engagement = sum(engagement_scores) / len(engagement_scores)
+        score += avg_engagement * ENGAGEMENT_WEIGHT
 
     return score
 

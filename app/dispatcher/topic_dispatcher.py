@@ -72,11 +72,15 @@ class TopicDispatcher:
             channel_dir = os.path.join(generated_base, cid)
             os.makedirs(channel_dir, exist_ok=True)
             
-            # Create generation request
+            # Create generation request — pass intelligence engine fields
             request = {
                 "channel_id": cid,
                 "channel_name": self.channel_config[cid]["name"],
                 "topic": topic,
+                "youtube_title": topic.get("youtube_title", topic.get("title", "")),
+                "hook": topic.get("hook", ""),
+                "angle": topic.get("angle", ""),
+                "engagement_score": topic.get("engagement_score", 0),
                 "model": self.channel_config[cid]["model"],
                 "tone": self.channel_config[cid]["tone"],
                 "status": "pending_generation",

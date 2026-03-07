@@ -119,17 +119,17 @@ class TopicCluster:
 
 if __name__ == "__main__":
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    DATA_DIR = os.path.join(BASE_DIR, "data", "topics_analyzed")
+    DATA_DIR = os.path.join(BASE_DIR, "data", "topics_intelligent")
     CLUSTER_DIR = os.path.join(BASE_DIR, "data", "topic_clusters")
     os.makedirs(CLUSTER_DIR, exist_ok=True)
     
     files = sorted(glob.glob(f"{DATA_DIR}/*.json"))
     if not files:
-        print("ERROR: No analyzed topics found. Run topic_analyzer.py first.")
+        print("ERROR: No intelligent topics found. Run topic_intelligence.py first.")
         exit(1)
         
     latest_file = files[-1]
-    print(f"Reading analyzed topics from: {latest_file}")
+    print(f"Reading intelligent topics from: {latest_file}")
     with open(latest_file) as f:
         topics = json.load(f)
     

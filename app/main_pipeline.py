@@ -1,11 +1,19 @@
 """
-AI Factory Pipeline — production-grade orchestrator.
+AI Factory Pipeline v2 — production-grade orchestrator.
 
-10-stage pipeline optimized for throughput:
-  scraper → cleaner → analyzer → validator(HALT if 0) → cluster →
-  prioritizer → dispatcher → script_generator → scene_splitter → voice_generator
+15-stage cinematic shorts engine:
+  scraper → cleaner → topic_intelligence(HALT if 0) → cluster →
+  prioritizer → dispatcher → script_generator → script_cleaner →
+  scene_planner → cinematic_director → copyright_guard → voice_generator →
+  video_builder → quality_checker → cleanup
 
-Hard halt after validator if 0 topics survive.
+v2 changes:
+- Topic Intelligence Engine replaces thin analyzer + content_validator
+- Copyright Guard stage after cinematic_director
+- Prompt caching stats in health report
+- Visual diversity metrics
+
+Hard halt after topic_intelligence if 0 topics survive.
 Comprehensive health report with pipeline health flags.
 """
 
@@ -34,38 +42,37 @@ logging.basicConfig(
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(PROJECT_ROOT)
 
-# ==================== PRODUCTION PIPELINE ====================
-# 15 stages — cinematic shorts engine
+# ==================== PRODUCTION PIPELINE v2 ====================
+# 15 stages — cinematic shorts engine with intelligence layer
 PIPELINE = [
     "app.scraper.topic_scraper",
     "app.scraper.topic_cleaner",
-    "app.analyzer.topic_analyzer",
-    "app.analyzer.topic_content_validator",
-    # --- HARD HALT CHECK HERE IF 0 VALIDATED ---
+    "app.analyzer.topic_intelligence",       # v2: replaces analyzer + content_validator
+    # --- HARD HALT CHECK HERE IF 0 INTELLIGENT TOPICS ---
     "app.analyzer.topic_cluster",
     "app.analyzer.topic_prioritizer",
     "app.dispatcher.topic_dispatcher",
     "app.workers.topic_script_generator",
     "app.workers.script_cleaner",
     "app.workers.scene_planner",
-    "app.video.cinematic_director",          # NEW: film-level editing decisions
+    "app.video.cinematic_director",
+    "app.video.copyright_guard",             # v2: copyright safety check
     "app.workers.voice_generator",
     # --- VIDEO PIPELINE ---
     "app.video.video_builder_shorts",
-    "app.video.quality_checker",             # NEW: pre-export validation
+    "app.video.quality_checker",
     "app.video.cleanup",
 ]
 
-# Validator is the halt-check stage
-HALT_CHECK_STAGE = "app.analyzer.topic_content_validator"
-HALT_CHECK_DIR = "data/topics_validated"
+# Intelligence engine is the halt-check stage
+HALT_CHECK_STAGE = "app.analyzer.topic_intelligence"
+HALT_CHECK_DIR = "data/topics_intelligent"
 
 # Stage-to-data mapping for metrics collection
 STAGE_DATA_DIRS = {
     "app.scraper.topic_scraper": ("data/topics", "scraped"),
     "app.scraper.topic_cleaner": ("data/topics_clean", "cleaned"),
-    "app.analyzer.topic_analyzer": ("data/topics_analyzed", "analyzed"),
-    "app.analyzer.topic_content_validator": ("data/topics_validated", "validated"),
+    "app.analyzer.topic_intelligence": ("data/topics_intelligent", "intelligent"),
     "app.analyzer.topic_cluster": ("data/topic_clusters", "clustered"),
     "app.analyzer.topic_prioritizer": ("data/topic_queue", "queued"),
     "app.dispatcher.topic_dispatcher": ("data/topic_generated", "dispatched"),
@@ -73,6 +80,7 @@ STAGE_DATA_DIRS = {
     "app.workers.script_cleaner": ("data/topic_scripts_clean", "cleaned_scripts"),
     "app.workers.scene_planner": ("data/scene_plans", "scene_planned"),
     "app.video.cinematic_director": ("data/directed_plans", "directed"),
+    "app.video.copyright_guard": ("data/directed_plans", "copyright_checked"),
     "app.workers.voice_generator": ("data/audio", "audio"),
     "app.video.video_builder_shorts": ("data/shorts/final", "video"),
     "app.video.quality_checker": ("", "qc"),
@@ -193,17 +201,17 @@ def run_step(module_name):
 
 
 def check_halt_condition():
-    """Check if pipeline should halt after validator stage."""
-    validated_count = count_items_in_latest_json(HALT_CHECK_DIR)
-    if validated_count == 0:
+    """Check if pipeline should halt after topic intelligence stage."""
+    intelligent_count = count_items_in_latest_json(HALT_CHECK_DIR)
+    if intelligent_count == 0:
         print("\n" + "=" * 60)
-        print("🛑 PIPELINE HALTED — 0 validated topics")
-        print("   No content survived validation. Downstream stages skipped.")
-        print("   Check scraper sources and article extraction quality.")
+        print("🛑 PIPELINE HALTED — 0 intelligent topics")
+        print("   No content survived the Topic Intelligence Engine.")
+        print("   Check scraper sources, article quality, and engagement thresholds.")
         print("=" * 60)
-        logging.error("PIPELINE HALTED: 0 validated topics after content validation")
+        logging.error("PIPELINE HALTED: 0 intelligent topics after Topic Intelligence Engine")
         return True
-    print(f"\n✅ {validated_count} validated topics — continuing pipeline\n")
+    print(f"\n✅ {intelligent_count} intelligent topics — continuing pipeline\n")
     return False
 
 
@@ -248,8 +256,7 @@ def print_health_report():
     # Collect counts
     scraped = count_items_in_latest_json("data/topics")
     cleaned = count_items_in_latest_json("data/topics_clean")
-    analyzed = count_items_in_latest_json("data/topics_analyzed")
-    validated = count_items_in_latest_json("data/topics_validated")
+    intelligent = count_items_in_latest_json("data/topics_intelligent")
 
     # Cluster info
     cluster_dir = os.path.join(BASE_DIR, "data", "topic_clusters")
@@ -278,8 +285,7 @@ def print_health_report():
     print(f"  {'─' * 40}")
     print(f"  Scraped (raw topics):    {scraped}")
     print(f"  Cleaned (valid):         {cleaned}")
-    print(f"  Analyzed:                {analyzed}")
-    print(f"  Validated:               {validated}")
+    print(f"  Intelligent (YouTube):   {intelligent}")
     print(f"  Clusters:                {cluster_count} (containing {clustered_topics} topics)")
     print(f"  Queued (prioritized):    {queued}")
     print(f"  Dispatched:              {dispatched}")
@@ -288,15 +294,15 @@ def print_health_report():
     print(f"  Audio Clips:             {audio_clips}")
 
     # Success rates
-    validation_rate = (validated / analyzed * 100) if analyzed > 0 else 0
-    # Use validated as denominator for script rate (dispatched files get consumed)
-    script_rate = (generated / max(validated, 1) * 100) if validated > 0 else 0
+    intelligence_rate = (intelligent / cleaned * 100) if cleaned > 0 else 0
+    # Use intelligent as denominator for script rate (dispatched files get consumed)
+    script_rate = (generated / max(intelligent, 1) * 100) if intelligent > 0 else 0
     scene_rate = (scenes / max(generated, 1) * 100) if generated > 0 else 0
     audio_rate = (audio_clips / max(scenes, 1) * 100) if scenes > 0 else 0
 
     print(f"\n  📈 Key Metrics:")
     print(f"  {'─' * 40}")
-    print(f"  validation_success_rate: {validation_rate:.1f}%")
+    print(f"  intelligence_rate:       {intelligence_rate:.1f}%")
     print(f"  script_success_rate:     {script_rate:.1f}%")
     print(f"  avg_script_length:       {avg_script_length:.0f} words")
     print(f"  avg_script_gen_time:     {avg_gen_time:.1f}s")
@@ -333,8 +339,8 @@ def print_health_report():
         print("🏆 PIPELINE HEALTHY — targets met!")
     elif generated > 0 and scenes > 0:
         print("⚠️  PIPELINE PARTIAL — producing output, below targets")
-    elif validated > 0:
-        print("❌ PIPELINE DEGRADED — validated topics exist but no scripts generated")
+    elif intelligent > 0:
+        print("❌ PIPELINE DEGRADED — intelligent topics exist but no scripts generated")
     else:
         print("🚨 PIPELINE BROKEN — no topics surviving pipeline")
 

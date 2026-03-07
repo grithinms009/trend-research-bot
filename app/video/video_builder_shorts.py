@@ -45,7 +45,8 @@ def _load_channel_config() -> Dict:
     base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     path = os.path.join(base, "app", "config", "channels.yaml")
     with open(path) as f:
-        return yaml.safe_load(f).get("channels", {})
+        raw = yaml.safe_load(f) or {}
+    return raw.get("channels", {}) if isinstance(raw, dict) else {}
 
 
 def _run_ffmpeg(cmd: List[str], timeout: int = 120) -> bool:

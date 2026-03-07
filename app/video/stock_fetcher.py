@@ -158,7 +158,8 @@ def _load_channel_config() -> Dict:
     base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     path = os.path.join(base, "app", "config", "channels.yaml")
     with open(path) as f:
-        return yaml.safe_load(f).get("channels", {})
+        raw = yaml.safe_load(f) or {}
+    return raw.get("channels", {}) if isinstance(raw, dict) else {}
 
 
 def search_pexels(query: str, orientation: str = "portrait", per_page: int = 5) -> List[Dict]:
@@ -261,13 +262,28 @@ class StockFetcher:
             visual_intent = scene.get("visual_intent", "cinematic_dark")
             emotion = scene.get("emotion", "neutral")
 
-            # Get search query from visual intent mapping
-            query = get_search_query(visual_intent, emotion)
+            # v2: prefer pre-generated visual_prompts from enhanced scene planner
+            visual_prompts = scene.get("visual_prompts", [])
+            if visual_prompts:
+                # Pick first unused prompt from the pre-generated list
+                query = None
+                for vp in visual_prompts:
+                    if vp not in self._used_queries:
+                        query = vp
+                        break
+                if not query:
+                    query = random.choice(visual_prompts)
+            else:
+                # Fallback to visual intent mapping
+                query = get_search_query(visual_intent, emotion)
 
             # Avoid repeating same query across scenes
             attempts = 0
             while query in self._used_queries and attempts < 3:
-                query = get_search_query(visual_intent, emotion)
+                if visual_prompts:
+                    query = random.choice(visual_prompts)
+                else:
+                    query = get_search_query(visual_intent, emotion)
                 attempts += 1
             self._used_queries.add(query)
 
