@@ -447,7 +447,15 @@ class TopicIntelligenceEngine:
                 self.metrics["topics_rejected_short_article"] += 1
                 continue
 
-            if any(p in lower for p in BANNED_PATTERNS):
+            # Check for consent walls / cookie banners:
+            # - If banned pattern appears in first 500 chars → likely a consent wall
+            # - If 3+ banned patterns match anywhere → likely scraped junk page
+            head = lower[:500]
+            head_match = any(p in head for p in BANNED_PATTERNS)
+            full_matches = sum(1 for p in BANNED_PATTERNS if p in lower)
+            if head_match or full_matches >= 3:
+                logger.info("Rejected banned content (%d matches, head=%s): %s",
+                            full_matches, head_match, topic.get("title", "?")[:60])
                 self.metrics["topics_rejected_banned"] += 1
                 continue
 

@@ -219,7 +219,7 @@ def get_script_stats():
     """Compute script-level stats for health report."""
     scripts_dir = os.path.join(BASE_DIR, "data", "topic_scripts")
     if not os.path.exists(scripts_dir):
-        return 0, 0.0, []
+        return 0, 0.0, 0.0
 
     word_counts = []
     gen_times = []

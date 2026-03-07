@@ -164,6 +164,12 @@ class BaseCollector(ABC):
             "article_length": len(content),
         }
 
+    # Domains that return consent/redirect pages instead of real articles
+    _SKIP_DOMAINS = [
+        "news.google.com", "google.com", "google.", "consent.google",
+        "accounts.google", "support.google",
+    ]
+
     @staticmethod
     def _extract_article_chain(url: str) -> Tuple[str, str, str, str]:
         """
@@ -178,6 +184,12 @@ class BaseCollector(ABC):
         summary = ""
         published_at = ""
         method = "none"
+
+        # Guard: skip known redirect/consent domains
+        domain = urlparse(url).netloc.lower()
+        if any(skip in domain for skip in BaseCollector._SKIP_DOMAINS):
+            logger.debug("Skipping extraction for redirect domain: %s", domain)
+            return article_text, summary, published_at, method
 
         # Tier 1: newspaper3k
         try:

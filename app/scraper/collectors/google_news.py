@@ -7,11 +7,13 @@ Resolves Google News redirect URLs to actual article URLs.
 """
 
 import logging
+import re
 from typing import Dict, List
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 import feedparser
 import requests
+from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
 
 from .base_collector import BaseCollector
@@ -99,7 +101,10 @@ class GoogleNewsCollector(BaseCollector):
 
             # Google News URLs are redirects — resolve to actual article URL
             raw_url = getattr(entry, "link", "")
-            url = self._resolve_google_url(raw_url) if raw_url else ""
+            # Try extracting real URL from RSS entry first (most reliable)
+            url = self._extract_url_from_entry(entry) or ""
+            if not url or "google" in urlparse(url).netloc.lower():
+                url = self._resolve_google_url(raw_url) if raw_url else ""
             title = getattr(entry, "title", "")
 
             if not title or not url:
@@ -125,6 +130,45 @@ class GoogleNewsCollector(BaseCollector):
             topics.append(enriched)
 
         return topics
+
+    @staticmethod
+    def _extract_url_from_entry(entry) -> str:
+        """Extract real article URL from RSS entry fields.
+        
+        Google News RSS entries contain the actual article URL in:
+        1. entry.source.href — publisher link
+        2. entry.summary / entry.description — HTML with <a href> to real article
+        3. entry.links — list of alternate links
+        """
+        # Try entry.source.href (feedparser provides this for some feeds)
+        source = getattr(entry, "source", None)
+        if source:
+            href = getattr(source, "href", "") or ""
+            if href and "google" not in href.lower():
+                return href
+
+        # Try extracting from summary/description HTML
+        for field in ["summary", "description"]:
+            html = getattr(entry, field, "") or ""
+            if html and "<a" in html.lower():
+                soup = BeautifulSoup(html, "html.parser")
+                for a_tag in soup.find_all("a", href=True):
+                    href = a_tag["href"]
+                    if isinstance(href, str) and href.startswith("http"):
+                        parsed = urlparse(href)
+                        domain = parsed.netloc.lower()
+                        if "google" not in domain and "feedburner" not in domain:
+                            return href
+
+        # Try entry.links list
+        links = getattr(entry, "links", []) or []
+        for link in links:
+            href = link.get("href", "") if isinstance(link, dict) else ""
+            rel = link.get("rel", "") if isinstance(link, dict) else ""
+            if href and rel != "self" and "google" not in href.lower():
+                return href
+
+        return ""
 
     @staticmethod
     def _resolve_google_url(google_url: str) -> str:
