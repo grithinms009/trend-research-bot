@@ -1,10 +1,14 @@
 import hashlib
-import subprocess
+import json
 import logging
 import time
 from typing import Dict, Optional, Tuple
 
+import requests
+
 logger = logging.getLogger(__name__)
+
+OLLAMA_API_URL = "http://localhost:11434/api/generate"
 
 
 class _PromptCache:
@@ -59,12 +63,12 @@ class OllamaClient:
     def generate(cls, prompt: str, model: str = "mistral:latest", timeout: int = 300,
                  use_cache: bool = True) -> Optional[str]:
         """
-        Generate text using Ollama 'run' command.
+        Generate text using Ollama HTTP API.
         
         Args:
             prompt: The input prompt for the LLM.
-            model: The model name (e.g., 'mistral:instruct', 'llama3').
-            timeout: Command timeout in seconds.
+            model: The model name (e.g., 'mistral:latest', 'deepseek-r1:7b').
+            timeout: Request timeout in seconds.
             use_cache: If True, check/store in prompt cache.
             
         Returns:
@@ -83,35 +87,40 @@ class OllamaClient:
                 logger.info("Cache HIT for model '%s' (saved LLM call)", model)
                 return cached
 
-        cmd = ["ollama", "run", model]
-        
         try:
-            logger.info(f"Ollama generating with model '{model}'...")
-            result = subprocess.run(
-                cmd,
-                input=prompt,
-                capture_output=True,
-                text=True,
+            logger.info(f"Ollama generating with model '{model}' via HTTP API...")
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+            }
+            resp = requests.post(
+                OLLAMA_API_URL,
+                json=payload,
                 timeout=timeout,
-                encoding='utf-8'
             )
-            
-            if result.returncode != 0:
-                logger.error(f"Ollama error (returncode {result.returncode}): {result.stderr}")
+            resp.raise_for_status()
+            data = resp.json()
+            response = (data.get("response") or "").strip()
+
+            if not response:
+                logger.warning("Ollama returned empty response for model '%s'", model)
                 return None
-            
-            response = result.stdout.strip()
+
             duration = time.time() - start_time
             logger.info(f"Ollama generation completed in {duration:.2f}s (model: {model})")
 
             # Store in cache
-            if use_cache and response:
+            if use_cache:
                 cls._cache.put(prompt, model, response)
-            
+
             return response
-            
-        except subprocess.TimeoutExpired:
+
+        except requests.exceptions.Timeout:
             logger.error(f"Ollama generation timed out after {timeout}s (model: {model})")
+            return None
+        except requests.exceptions.ConnectionError:
+            logger.error("Cannot connect to Ollama API at %s — is 'ollama serve' running?", OLLAMA_API_URL)
             return None
         except Exception as e:
             logger.error(f"Ollama generation failed: {str(e)}")

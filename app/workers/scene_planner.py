@@ -297,7 +297,7 @@ class ScenePlannerWorker:
         prompt = SCENE_PLANNER_PROMPT.format(narration=narration[:2000])
 
         try:
-            raw = OllamaClient.generate(prompt, model=model, timeout=90)
+            raw = OllamaClient.generate(prompt, model=model, timeout=180)
             elapsed = round(time.time() - start, 2)
             self.metrics["planning_times"].append(elapsed)
 
@@ -339,10 +339,14 @@ class ScenePlannerWorker:
                 continue
 
             channel_scenes = []
-            for script in scripts:
+            for si, script in enumerate(scripts):
                 script_body = (script.get("script_body") or "").strip()
                 if not script_body:
                     continue
+
+                title_preview = (script.get("title") or "Unknown")[:50]
+                print(f"  [{channel_id.upper()}] Planning {si+1}/{len(scripts)}: {title_preview}...",
+                      flush=True)
 
                 scenes = self.plan_scenes(script_body)
                 if not scenes:
