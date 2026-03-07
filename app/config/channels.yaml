@@ -2,7 +2,8 @@ channels:
   C1:
     name: "AI News & Tools"
     category: "Tech"
-    target_count: 8
+    target_count: 10
+    videos_per_day: 2
     model: "mistral:latest"
     tone: "breaking news"
     visual_profile: tech_dark
@@ -23,7 +24,8 @@ channels:
   C2:
     name: "Daily Market Bites"
     category: "Finance"
-    target_count: 6
+    target_count: 10
+    videos_per_day: 2
     model: "mistral:latest"
     tone: "market update"
     visual_profile: finance_clean
@@ -44,7 +46,8 @@ channels:
   C3:
     name: "Did You Know"
     category: "History/Science"
-    target_count: 6
+    target_count: 10
+    videos_per_day: 2
     model: "mistral:latest"
     tone: "storytelling"
     visual_profile: cinematic
@@ -65,7 +68,8 @@ channels:
   C4:
     name: "Luxury / Travel Top 5"
     category: "Luxury/Travel"
-    target_count: 5
+    target_count: 10
+    videos_per_day: 2
     model: "mistral:latest"
     tone: "cinematic"
     visual_profile: luxury_bright
@@ -86,7 +90,8 @@ channels:
   C5:
     name: "Life Hacks / Productivity"
     category: "Productivity"
-    target_count: 5
+    target_count: 10
+    videos_per_day: 2
     model: "mistral:latest"
     tone: "actionable tips"
     visual_profile: minimal_clean

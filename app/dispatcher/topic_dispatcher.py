@@ -45,6 +45,11 @@ class TopicDispatcher:
         generated_base = os.path.join(base_path, "data", "topic_generated")
         
         counts = {cid: 0 for cid in self.channel_config.keys()}
+        # Per-channel cap: only dispatch up to videos_per_day topics
+        channel_caps = {
+            cid: cfg.get("videos_per_day", 2)
+            for cid, cfg in self.channel_config.items()
+        }
         
         for topic in topics or []:
             self.metrics["topics_received"] += 1
@@ -57,6 +62,10 @@ class TopicDispatcher:
                     topic.get("title", "unknown")[:60], cid,
                 )
                 self.metrics["failure_reasons"].append(f"unknown_channel:{cid}")
+                continue
+
+            # Enforce per-channel cap
+            if counts[cid] >= channel_caps.get(cid, 2):
                 continue
 
             if not self._is_valid(topic):

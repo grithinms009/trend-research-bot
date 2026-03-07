@@ -12,25 +12,33 @@ from .base_collector import BaseCollector
 
 logger = logging.getLogger(__name__)
 
+# Each feed mapped to its intended channel
 SUBREDDIT_FEEDS = [
     # C1 — AI / Tech News
-    "https://www.reddit.com/r/worldnews/.rss",
-    "https://www.reddit.com/r/technology/.rss",
-    "https://www.reddit.com/r/artificial/.rss",
+    ("https://www.reddit.com/r/worldnews/.rss", "C1"),
+    ("https://www.reddit.com/r/technology/.rss", "C1"),
+    ("https://www.reddit.com/r/artificial/.rss", "C1"),
+    ("https://www.reddit.com/r/machinelearning/.rss", "C1"),
     # C2 — Finance / Markets
-    "https://www.reddit.com/r/stocks/.rss",
-    "https://www.reddit.com/r/cryptocurrency/.rss",
-    "https://www.reddit.com/r/economics/.rss",
+    ("https://www.reddit.com/r/stocks/.rss", "C2"),
+    ("https://www.reddit.com/r/cryptocurrency/.rss", "C2"),
+    ("https://www.reddit.com/r/economics/.rss", "C2"),
+    ("https://www.reddit.com/r/wallstreetbets/.rss", "C2"),
     # C3 — History / Science
-    "https://www.reddit.com/r/science/.rss",
-    "https://www.reddit.com/r/space/.rss",
-    "https://www.reddit.com/r/history/.rss",
-    "https://www.reddit.com/r/todayilearned/.rss",
+    ("https://www.reddit.com/r/science/.rss", "C3"),
+    ("https://www.reddit.com/r/space/.rss", "C3"),
+    ("https://www.reddit.com/r/history/.rss", "C3"),
+    ("https://www.reddit.com/r/todayilearned/.rss", "C3"),
+    ("https://www.reddit.com/r/askscience/.rss", "C3"),
     # C4 — Luxury / Travel
-    "https://www.reddit.com/r/travel/.rss",
+    ("https://www.reddit.com/r/travel/.rss", "C4"),
+    ("https://www.reddit.com/r/solotravel/.rss", "C4"),
+    ("https://www.reddit.com/r/luxurylifestyle/.rss", "C4"),
     # C5 — Productivity / Life Hacks
-    "https://www.reddit.com/r/productivity/.rss",
-    "https://www.reddit.com/r/getdisciplined/.rss",
+    ("https://www.reddit.com/r/productivity/.rss", "C5"),
+    ("https://www.reddit.com/r/getdisciplined/.rss", "C5"),
+    ("https://www.reddit.com/r/selfimprovement/.rss", "C5"),
+    ("https://www.reddit.com/r/LifeProTips/.rss", "C5"),
 ]
 
 MAX_ENTRIES_PER_FEED = 15
@@ -42,16 +50,16 @@ class RedditCollector(BaseCollector):
     def collect_topics(self) -> List[Dict]:
         all_topics = []
 
-        for feed_url in SUBREDDIT_FEEDS:
+        for feed_url, channel_hint in SUBREDDIT_FEEDS:
             try:
-                topics = self._fetch_feed(feed_url)
+                topics = self._fetch_feed(feed_url, channel_hint)
                 all_topics.extend(topics)
             except Exception as e:
                 logger.warning(f"Reddit feed error ({feed_url}): {e}")
 
         return all_topics
 
-    def _fetch_feed(self, feed_url: str) -> List[Dict]:
+    def _fetch_feed(self, feed_url: str, channel_hint: str = "C1") -> List[Dict]:
         feed = feedparser.parse(feed_url)
         topics = []
 
@@ -83,6 +91,11 @@ class RedditCollector(BaseCollector):
             }
 
             enriched = self.enrich_topic(raw)
+
+            # Respect channel hint from subreddit mapping
+            if enriched.get("channel") == "C1" and channel_hint != "C1":
+                enriched["channel"] = channel_hint
+
             topics.append(enriched)
 
         return topics
