@@ -53,19 +53,31 @@ class VoiceGeneratorWorker:
             logger.error("Failed to read %s: %s", path, exc)
             return []
 
-    async def _synthesize_scene(self, text: str, voice: str, output_path: str) -> bool:
-        """Generate audio for a single scene narration chunk."""
-        try:
-            import edge_tts
-            communicate = edge_tts.Communicate(text, voice)
-            await communicate.save(output_path)
+    async def _synthesize_scene(self, text: str, voice: str, output_path: str,
+                                max_retries: int = 3) -> bool:
+        """Generate audio for a single scene narration chunk with retry logic."""
+        import edge_tts
 
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 100:
-                return True
-            return False
-        except Exception as exc:
-            print(f"    TTS Error: {type(exc).__name__}: {exc}")
-            return False
+        for attempt in range(1, max_retries + 1):
+            try:
+                communicate = edge_tts.Communicate(text, voice)
+                await communicate.save(output_path)
+
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 100:
+                    return True
+
+                logger.warning("TTS produced empty/tiny file (attempt %d/%d)", attempt, max_retries)
+            except Exception as exc:
+                logger.warning("TTS attempt %d/%d failed: %s: %s", attempt, max_retries,
+                               type(exc).__name__, exc)
+                if attempt < max_retries:
+                    wait = 2 ** attempt  # 2s, 4s backoff
+                    print(f"    TTS retry {attempt}/{max_retries} in {wait}s...")
+                    await asyncio.sleep(wait)
+                else:
+                    print(f"    TTS FAILED after {max_retries} attempts: {type(exc).__name__}: {exc}")
+
+        return False
 
     def _add_silence_padding(self, audio_path: str, pause_ms: int = 300) -> bool:
         """Add silence after audio file for natural pacing between scenes."""

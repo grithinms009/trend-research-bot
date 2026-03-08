@@ -285,32 +285,35 @@ def run_quality_check(video_path: str, scene_plan: Dict) -> Dict:
         results["issues"].append("No audio stream found")
         results["passed"] = False
 
-    # Scene plan checks
-    plan_issues = check_scene_plan(scene_plan)
-    results["checks"]["scene_plan"] = {"ok": len(plan_issues) == 0, "issues": plan_issues}
-    results["issues"].extend(plan_issues)
+    # Scene-plan-based checks — only run when scene data is available
+    scenes = scene_plan.get("scenes", [])
+    if scenes:
+        # Scene plan checks
+        plan_issues = check_scene_plan(scene_plan)
+        results["checks"]["scene_plan"] = {"ok": len(plan_issues) == 0, "issues": plan_issues}
+        results["issues"].extend(plan_issues)
 
-    # Transition quality checks
-    transition_issues = check_transitions(scene_plan)
-    results["checks"]["transitions"] = {"ok": len(transition_issues) == 0, "issues": transition_issues}
-    results["issues"].extend(transition_issues)
+        # Transition quality checks
+        transition_issues = check_transitions(scene_plan)
+        results["checks"]["transitions"] = {"ok": len(transition_issues) == 0, "issues": transition_issues}
+        results["issues"].extend(transition_issues)
 
-    # Pacing validation
-    pacing_issues = check_pacing(scene_plan)
-    results["checks"]["pacing"] = {"ok": len(pacing_issues) == 0, "issues": pacing_issues}
-    results["issues"].extend(pacing_issues)
+        # Pacing validation
+        pacing_issues = check_pacing(scene_plan)
+        results["checks"]["pacing"] = {"ok": len(pacing_issues) == 0, "issues": pacing_issues}
+        results["issues"].extend(pacing_issues)
 
-    # Scene diversity score
-    diversity_score, diversity_issues = check_scene_diversity(scene_plan)
-    results["checks"]["diversity"] = {"ok": diversity_score >= 0.6, "score": diversity_score, "issues": diversity_issues}
-    results["issues"].extend(diversity_issues)
+        # Scene diversity score
+        diversity_score, diversity_issues = check_scene_diversity(scene_plan)
+        results["checks"]["diversity"] = {"ok": diversity_score >= 0.6, "score": diversity_score, "issues": diversity_issues}
+        results["issues"].extend(diversity_issues)
 
-    # Static footage ratio
-    static_ratio, static_issues = check_static_footage_ratio(scene_plan)
-    results["checks"]["static_footage"] = {"ok": static_ratio <= 0.4, "ratio": static_ratio, "issues": static_issues}
-    if static_ratio > 0.4:
-        results["passed"] = False
-    results["issues"].extend(static_issues)
+        # Static footage ratio
+        static_ratio, static_issues = check_static_footage_ratio(scene_plan)
+        results["checks"]["static_footage"] = {"ok": static_ratio <= 0.4, "ratio": static_ratio, "issues": static_issues}
+        if static_ratio > 0.4:
+            results["passed"] = False
+        results["issues"].extend(static_issues)
 
     # File size check
     if os.path.exists(video_path):

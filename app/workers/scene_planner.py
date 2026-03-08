@@ -368,25 +368,32 @@ class ScenePlannerWorker:
             "visual_prompts_generated": 0,
         }
 
-    def plan_scenes(self, narration: str, model: str = "mistral:latest") -> List[Dict]:
-        """Plan scenes for a narration using LLM with deterministic fallback."""
-        start = time.time()
-
+    def plan_scenes(self, narration: str, model: str = "mistral:latest",
+                    max_retries: int = 2) -> List[Dict]:
+        """Plan scenes for a narration using LLM with retry and deterministic fallback."""
         prompt = SCENE_PLANNER_PROMPT.format(narration=narration[:2000])
 
-        try:
-            raw = OllamaClient.generate(prompt, model=model, timeout=180)
-            elapsed = round(time.time() - start, 2)
-            self.metrics["planning_times"].append(elapsed)
+        for attempt in range(1, max_retries + 1):
+            start = time.time()
+            try:
+                raw = OllamaClient.generate(prompt, model=model, timeout=180)
+                elapsed = round(time.time() - start, 2)
+                self.metrics["planning_times"].append(elapsed)
 
-            if raw:
-                scenes = _parse_llm_scenes(raw, narration)
-                if scenes:
-                    self.metrics["llm_successes"] += 1
-                    return scenes
+                if raw:
+                    scenes = _parse_llm_scenes(raw, narration)
+                    if scenes:
+                        self.metrics["llm_successes"] += 1
+                        return scenes
 
-        except Exception as exc:
-            logger.error("Scene planner LLM failed: %s", exc)
+                logger.warning("LLM returned empty/unparseable response (attempt %d/%d)",
+                               attempt, max_retries)
+            except Exception as exc:
+                logger.error("Scene planner LLM attempt %d/%d failed: %s", attempt, max_retries, exc)
+
+            if attempt < max_retries:
+                logger.info("Retrying LLM scene planning (attempt %d)...", attempt + 1)
+                time.sleep(3)
 
         self.metrics["llm_failures"] += 1
         self.metrics["fallback_used"] += 1
