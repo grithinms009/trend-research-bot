@@ -12,33 +12,26 @@ from .base_collector import BaseCollector
 
 logger = logging.getLogger(__name__)
 
-# Each feed mapped to its intended channel
+# Each feed mapped to its intended channel (active: C1 + C5 only)
 SUBREDDIT_FEEDS = [
     # C1 — AI / Tech News
     ("https://www.reddit.com/r/worldnews/.rss", "C1"),
     ("https://www.reddit.com/r/technology/.rss", "C1"),
     ("https://www.reddit.com/r/artificial/.rss", "C1"),
     ("https://www.reddit.com/r/machinelearning/.rss", "C1"),
-    # C2 — Finance / Markets
-    ("https://www.reddit.com/r/stocks/.rss", "C2"),
-    ("https://www.reddit.com/r/cryptocurrency/.rss", "C2"),
-    ("https://www.reddit.com/r/economics/.rss", "C2"),
-    ("https://www.reddit.com/r/wallstreetbets/.rss", "C2"),
-    # C3 — History / Science
-    ("https://www.reddit.com/r/science/.rss", "C3"),
-    ("https://www.reddit.com/r/space/.rss", "C3"),
-    ("https://www.reddit.com/r/history/.rss", "C3"),
-    ("https://www.reddit.com/r/todayilearned/.rss", "C3"),
-    ("https://www.reddit.com/r/askscience/.rss", "C3"),
-    # C4 — Luxury / Travel
-    ("https://www.reddit.com/r/travel/.rss", "C4"),
-    ("https://www.reddit.com/r/solotravel/.rss", "C4"),
-    ("https://www.reddit.com/r/luxurylifestyle/.rss", "C4"),
+    ("https://www.reddit.com/r/science/.rss", "C1"),
+    ("https://www.reddit.com/r/Futurology/.rss", "C1"),
+    ("https://www.reddit.com/r/singularity/.rss", "C1"),
+    ("https://www.reddit.com/r/ChatGPT/.rss", "C1"),
     # C5 — Productivity / Life Hacks
     ("https://www.reddit.com/r/productivity/.rss", "C5"),
     ("https://www.reddit.com/r/getdisciplined/.rss", "C5"),
     ("https://www.reddit.com/r/selfimprovement/.rss", "C5"),
     ("https://www.reddit.com/r/LifeProTips/.rss", "C5"),
+    ("https://www.reddit.com/r/Entrepreneur/.rss", "C5"),
+    ("https://www.reddit.com/r/DecidingToBeBetter/.rss", "C5"),
+    ("https://www.reddit.com/r/ZenHabits/.rss", "C5"),
+    ("https://www.reddit.com/r/simpleliving/.rss", "C5"),
 ]
 
 MAX_ENTRIES_PER_FEED = 15

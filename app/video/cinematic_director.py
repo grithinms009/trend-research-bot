@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from app.services.ollama_client import OllamaClient
+from app.video.transition_engine import TransitionEngine
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +99,6 @@ VISUAL_METAPHORS = {
 # Channel-specific color grades
 CHANNEL_COLOR_GRADES = {
     "C1": "cool_news",
-    "C2": "neutral",
-    "C3": "cinematic_dark",
-    "C4": "warm_luxury",
     "C5": "bright_clean",
 }
 
@@ -238,9 +236,10 @@ def _parse_llm_direction(raw: str) -> Optional[Dict]:
 
 
 class CinematicDirector:
-    """Adds film-level editing instructions to each scene."""
+    """Adds film-level editing instructions and cinematic transitions to each scene."""
 
     def __init__(self):
+        self.transition_engine = TransitionEngine()
         self.metrics = {
             "scenes_directed": 0,
             "llm_used": 0,
@@ -287,7 +286,7 @@ class CinematicDirector:
 
     def direct_topic(self, scene_plan: Dict, channel_config: Dict,
                      model: str = "mistral:latest") -> Dict:
-        """Add cinematic direction to all scenes in a topic."""
+        """Add cinematic direction and transitions to all scenes in a topic."""
         channel = scene_plan.get("channel_id", "C1")
         ch = channel_config.get(channel, {})
         tone = ch.get("tone", "neutral")
@@ -307,9 +306,17 @@ class CinematicDirector:
 
             prev_camera = direction.get("camera_motion", "")
 
+        # Apply transition engine — adds entry/exit transitions, overlap, momentum
+        directed_scenes = self.transition_engine.plan_transitions(directed_scenes)
+
+        # Validate transitions for quality issues
+        transition_issues = self.transition_engine.validate_transitions(directed_scenes)
+
         result = dict(scene_plan)
         result["scenes"] = directed_scenes
         result["cinematic_directed"] = True
+        result["transitions_applied"] = True
+        result["transition_issues"] = transition_issues
         result["directed_at"] = datetime.now().isoformat()
         return result
 
@@ -319,8 +326,8 @@ class CinematicDirector:
             if k == "direction_times" and v:
                 print(f"  avg_direction_time: {sum(v) / len(v):.2f}s")
             elif k != "direction_times":
-                print(f"{k}: {v}")
-        print("----------------------------------\n")
+                print(f"  {k}: {v}")
+        self.transition_engine.log_metrics()
 
 
 def main():
@@ -333,7 +340,8 @@ def main():
 
     config_path = os.path.join(base_dir, "app", "config", "channels.yaml")
     with open(config_path) as f:
-        channel_config = yaml.safe_load(f).get("channels", {})
+        raw = yaml.safe_load(f) or {}
+    channel_config = raw.get("channels", {}) if isinstance(raw, dict) else {}
 
     scene_files = sorted(glob.glob(os.path.join(scene_plan_dir, "*", "*.json")))
     scene_files += sorted(glob.glob(os.path.join(scene_plan_dir, "*.json")))

@@ -1,7 +1,7 @@
 """
 Google News RSS collector — fetches trending articles per channel category.
 
-Provides high-quality articles with real URLs for all 5 channels by
+Provides high-quality articles with real URLs for active channels by
 querying category-specific search terms via Google News RSS.
 Resolves Google News redirect URLs to actual article URLs.
 """
@@ -24,7 +24,7 @@ MAX_ENTRIES_PER_QUERY = 8
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
 REQUEST_TIMEOUT = 10
 
-# Category-specific search queries mapped to channels
+# Category-specific search queries mapped to active channels (C1 + C5)
 CHANNEL_QUERIES = {
     "C1": [
         "artificial intelligence news today",
@@ -32,27 +32,11 @@ CHANNEL_QUERIES = {
         "new AI tool released",
         "cybersecurity news",
         "robotics breakthrough",
-    ],
-    "C2": [
-        "stock market news today",
-        "cryptocurrency news",
-        "federal reserve interest rate",
-        "wall street earnings report",
-        "global economy news",
-    ],
-    "C3": [
-        "scientific discovery news",
-        "space exploration news NASA",
-        "archaeology ancient discovery",
-        "physics breakthrough research",
-        "history documentary facts",
-    ],
-    "C4": [
-        "luxury travel destination",
-        "world best hotels resorts",
-        "luxury lifestyle billionaire",
-        "exotic vacation island paradise",
-        "supercar luxury brand news",
+        "ChatGPT OpenAI news",
+        "AI regulation policy",
+        "machine learning research",
+        "tech layoffs hiring news",
+        "Apple Google Microsoft AI",
     ],
     "C5": [
         "productivity tips habits",
@@ -60,6 +44,11 @@ CHANNEL_QUERIES = {
         "self improvement life hacks",
         "time management work life balance",
         "mental health mindfulness tips",
+        "remote work productivity",
+        "best apps productivity tools",
+        "focus deep work tips",
+        "habit building science",
+        "minimalism simple living tips",
     ],
 }
 

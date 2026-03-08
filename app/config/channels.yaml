@@ -2,8 +2,8 @@ channels:
   C1:
     name: "AI News & Tools"
     category: "Tech"
-    target_count: 10
-    videos_per_day: 2
+    target_count: 20
+    videos_per_day: 4
     model: "mistral:latest"
     tone: "breaking news"
     visual_profile: tech_dark
@@ -21,77 +21,11 @@ channels:
       pacing_bias: fast
       default_emotion: tension
       voice: "en-US-GuyNeural"
-  C2:
-    name: "Daily Market Bites"
-    category: "Finance"
-    target_count: 10
-    videos_per_day: 2
-    model: "mistral:latest"
-    tone: "market update"
-    visual_profile: finance_clean
-    music_profile: corporate
-    pacing: medium
-    font_color: "#00FF88"
-    bg_color: "#0d1117"
-    accent_color: "#FF4444"
-    search_terms: ["stock market", "finance business", "money investment", "city skyline", "trading"]
-    creative:
-      tone: authoritative
-      caption_style: clean_data
-      music_energy: medium
-      color_grade: neutral_sharp
-      pacing_bias: medium
-      default_emotion: urgency
-      voice: "en-US-JennyNeural"
-  C3:
-    name: "Did You Know"
-    category: "History/Science"
-    target_count: 10
-    videos_per_day: 2
-    model: "mistral:latest"
-    tone: "storytelling"
-    visual_profile: cinematic
-    music_profile: atmospheric
-    pacing: slow
-    font_color: "#FFD700"
-    bg_color: "#1a1a2e"
-    accent_color: "#E94560"
-    search_terms: ["science laboratory", "space stars", "ancient ruins", "nature landscape", "ocean deep"]
-    creative:
-      tone: mysterious_storyteller
-      caption_style: dramatic_reveal
-      music_energy: low
-      color_grade: warm_cinematic
-      pacing_bias: slow
-      default_emotion: curiosity
-      voice: "en-GB-RyanNeural"
-  C4:
-    name: "Luxury / Travel Top 5"
-    category: "Luxury/Travel"
-    target_count: 10
-    videos_per_day: 2
-    model: "mistral:latest"
-    tone: "cinematic"
-    visual_profile: luxury_bright
-    music_profile: upbeat_classy
-    pacing: slow
-    font_color: "#FFFFFF"
-    bg_color: "#1c1c1c"
-    accent_color: "#D4AF37"
-    search_terms: ["luxury hotel", "tropical beach", "yacht ocean", "luxury car", "resort pool"]
-    creative:
-      tone: aspirational
-      caption_style: elegant_minimal
-      music_energy: medium
-      color_grade: warm_bright
-      pacing_bias: slow
-      default_emotion: reveal
-      voice: "en-US-AriaNeural"
   C5:
     name: "Life Hacks / Productivity"
     category: "Productivity"
-    target_count: 10
-    videos_per_day: 2
+    target_count: 20
+    videos_per_day: 4
     model: "mistral:latest"
     tone: "actionable tips"
     visual_profile: minimal_clean

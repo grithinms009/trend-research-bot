@@ -30,6 +30,19 @@ logger = logging.getLogger(__name__)
 # Valid values for scene metadata
 VALID_EMOTIONS = {"shock", "tension", "reveal", "neutral", "dramatic", "curiosity", "urgency"}
 VALID_CUT_STYLES = {"hard", "smash", "slow"}
+VALID_CAMERA_STYLES = {
+    "slow_push_in", "fast_punch_in", "pull_out", "lateral_pan",
+    "static_tension", "slow_drift", "rack_focus", "dolly_zoom",
+    "overhead_descent", "handheld_shake",
+}
+
+# Visual contrast pattern — prevents visual boredom by cycling shot types
+# Pattern: wide → macro → motion → abstract → wide
+SHOT_CONTRAST_CYCLE = ["wide", "macro", "motion", "abstract", "wide", "detail"]
+
+# Scene pacing bounds (seconds) — retention drops if scenes stay too long
+MIN_SCENE_DURATION = 3.0
+MAX_SCENE_DURATION = 6.0
 
 # ============================================================
 # VISUAL PROMPT TEMPLATES — per-sentence visual suggestions
@@ -119,44 +132,63 @@ DEFAULT_VISUAL_PROMPTS = {
     "urgency": ["fast motion blur city", "countdown timer dramatic", "emergency lights flashing"],
 }
 
-SCENE_PLANNER_PROMPT = """Break this narration into 4-6 short scenes for a YouTube Short.
+SCENE_PLANNER_PROMPT = """Break this narration into 4-6 cinematic scenes for a YouTube Short.
 
 NARRATION:
 {narration}
 
 For EACH scene output a JSON object with these exact fields:
 - "scene_id": number (1, 2, 3...)
-- "narration": the exact narration text for this scene (5-12 seconds of speech)
+- "narration": the exact narration text for this scene (8-15 words, 3-6 seconds)
 - "emotion": one of: shock, tension, reveal, neutral, dramatic, curiosity, urgency
 - "energy": number 1-5 (1=calm, 5=intense)
-- "visual_intent": what to show visually. Use SYMBOLIC descriptions, never person names.
-  Examples: "abstract_tension", "document", "crowd_reaction", "building", "tech_ui", "luxury", "nature", "urban", "data_visualization", "cinematic_dark"
-- "emphasis_words": list of 1-3 key words to highlight in captions
+- "visual_intent": symbolic description. Examples: "abstract_tension", "tech_ui", "nature", "urban", "luxury", "data_visualization", "cinematic_dark", "document", "building"
+- "camera_style": one of: slow_push_in, fast_punch_in, pull_out, lateral_pan, static_tension, slow_drift, rack_focus, dolly_zoom
+- "shot_type": one of: wide, macro, motion, abstract, detail
+- "emphasis_words": list of 1-3 power words to highlight in captions
 - "cut_style": one of: hard, smash, slow
+- "visual_prompts": object with 3 search strategies:
+  - "literal": direct visual description of the topic
+  - "emotional": human emotion or reaction matching the mood
+  - "symbolic": abstract/metaphorical visual representation
 
 RULES:
-- First scene must have energy >= 4 (it's the hook)
-- Last scene must have emotion = "curiosity" or "tension" (open loop)
-- NEVER use politician names or person names in visual_intent
-- Each narration chunk should be 15-40 words (5-12 seconds)
+- First scene MUST have energy >= 4 (it's the hook — movement, bright contrast, strong subject)
+- Last scene MUST have emotion = "curiosity" or "tension" (open loop for retention)
+- NEVER use politician names or person names in any field
+- Each scene = 3-6 seconds of speech (8-15 words)
+- Scenes MUST contrast visually: alternate shot_type (wide → macro → motion → abstract)
+- No two consecutive scenes should have the same camera_style
 - Output ONLY a JSON array. No explanation. No markdown.
 
 Output format:
 [
-  {{"scene_id": 1, "narration": "...", "emotion": "shock", "energy": 5, "visual_intent": "abstract_tension", "emphasis_words": ["word1"], "cut_style": "hard"}},
+  {{"scene_id": 1, "narration": "...", "emotion": "shock", "energy": 5, "visual_intent": "abstract_tension", "camera_style": "fast_punch_in", "shot_type": "macro", "emphasis_words": ["word1"], "cut_style": "hard", "visual_prompts": {{"literal": "AI robot interface screen", "emotional": "person shocked by computer", "symbolic": "neural network explosion digital"}}}},
   ...
 ]"""
 
 
 def _deterministic_fallback(narration: str) -> List[Dict]:
-    """Fallback: split by paragraphs with basic emotion guessing."""
+    """Fallback: split by paragraphs with cinematic defaults and visual contrast."""
     paragraphs = [p.strip() for p in narration.strip().split("\n\n") if p.strip()]
     if len(paragraphs) <= 1:
         paragraphs = [p.strip() for p in narration.strip().split("\n") if p.strip()]
     if len(paragraphs) <= 1 and paragraphs:
         words = paragraphs[0].split()
-        chunk_size = 25
+        # Target 8-15 words per scene (3-6 seconds)
+        chunk_size = 12
         paragraphs = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+
+    # Camera style rotation — no consecutive repeats
+    camera_cycle = [
+        "fast_punch_in", "slow_push_in", "lateral_pan",
+        "slow_drift", "pull_out", "rack_focus",
+    ]
+    # Visual intent rotation for variety
+    intent_cycle = [
+        "abstract_tension", "tech_ui", "cinematic_dark",
+        "urban", "nature", "data_visualization",
+    ]
 
     scenes = []
     for i, para in enumerate(paragraphs):
@@ -164,7 +196,7 @@ def _deterministic_fallback(narration: str) -> List[Dict]:
         if wc == 0:
             continue
 
-        # Basic emotion assignment by position
+        # Emotion assignment by position
         if i == 0:
             emotion, energy = "shock", 5
         elif i == len(paragraphs) - 1:
@@ -178,16 +210,27 @@ def _deterministic_fallback(narration: str) -> List[Dict]:
         all_words = [w.strip(".,!?;:'\"") for w in para.split()]
         emphasis = sorted(all_words, key=len, reverse=True)[:2]
 
+        # Visual contrast pattern — cycle shot types
+        shot_type = SHOT_CONTRAST_CYCLE[i % len(SHOT_CONTRAST_CYCLE)]
+        camera_style = camera_cycle[i % len(camera_cycle)]
+        visual_intent = intent_cycle[i % len(intent_cycle)]
+
+        # Enforce pacing: clamp duration to 3-6 seconds
+        raw_duration = wc / 2.5
+        duration = max(MIN_SCENE_DURATION, min(MAX_SCENE_DURATION, raw_duration))
+
         scenes.append({
             "scene_id": i + 1,
             "narration": para,
             "emotion": emotion,
             "energy": energy,
-            "visual_intent": "abstract_tension" if i == 0 else "cinematic_dark",
+            "visual_intent": visual_intent,
+            "camera_style": camera_style,
+            "shot_type": shot_type,
             "emphasis_words": emphasis,
             "cut_style": "hard" if energy >= 4 else "slow",
             "word_count": wc,
-            "estimated_duration": round(wc / 2.5, 2),
+            "estimated_duration": round(duration, 2),
         })
 
     return scenes
@@ -215,6 +258,7 @@ def _parse_llm_scenes(raw_output: str, narration: str) -> Optional[List[Dict]]:
 
     # Validate and sanitize each scene
     validated = []
+    prev_camera = ""
     for scene in scenes:
         if not isinstance(scene, dict):
             continue
@@ -235,6 +279,21 @@ def _parse_llm_scenes(raw_output: str, narration: str) -> Optional[List[Dict]]:
         if cut_style not in VALID_CUT_STYLES:
             cut_style = "hard"
 
+        # Validate camera_style
+        camera_style = scene.get("camera_style", "slow_push_in")
+        if camera_style not in VALID_CAMERA_STYLES:
+            camera_style = "slow_push_in"
+        # Avoid consecutive same camera
+        if camera_style == prev_camera:
+            alts = [c for c in VALID_CAMERA_STYLES if c != camera_style]
+            camera_style = alts[len(validated) % len(alts)] if alts else camera_style
+
+        # Validate shot_type with contrast cycling
+        shot_type = scene.get("shot_type", "")
+        valid_shots = set(SHOT_CONTRAST_CYCLE)
+        if shot_type not in valid_shots:
+            shot_type = SHOT_CONTRAST_CYCLE[len(validated) % len(SHOT_CONTRAST_CYCLE)]
+
         emphasis = scene.get("emphasis_words", [])
         if not isinstance(emphasis, list):
             emphasis = []
@@ -242,17 +301,36 @@ def _parse_llm_scenes(raw_output: str, narration: str) -> Optional[List[Dict]]:
 
         wc = len(scene["narration"].split())
 
+        # Enforce pacing: clamp duration to 3-6 seconds
+        raw_duration = wc / 2.5
+        duration = max(MIN_SCENE_DURATION, min(MAX_SCENE_DURATION, raw_duration))
+
+        # Parse 3-tier visual_prompts from LLM
+        llm_vp = scene.get("visual_prompts", {})
+        if isinstance(llm_vp, dict):
+            visual_prompts_3tier = {
+                "literal": llm_vp.get("literal", ""),
+                "emotional": llm_vp.get("emotional", ""),
+                "symbolic": llm_vp.get("symbolic", ""),
+            }
+        else:
+            visual_prompts_3tier = {"literal": "", "emotional": "", "symbolic": ""}
+
         validated.append({
             "scene_id": scene.get("scene_id", len(validated) + 1),
             "narration": scene["narration"],
             "emotion": emotion,
             "energy": energy,
             "visual_intent": scene.get("visual_intent", "cinematic_dark"),
+            "camera_style": camera_style,
+            "shot_type": shot_type,
             "emphasis_words": emphasis,
             "cut_style": cut_style,
             "word_count": wc,
-            "estimated_duration": round(wc / 2.5, 2),
+            "estimated_duration": round(duration, 2),
+            "visual_prompts_3tier": visual_prompts_3tier,
         })
+        prev_camera = camera_style
 
     return validated if len(validated) >= 2 else None
 

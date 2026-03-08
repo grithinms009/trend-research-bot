@@ -20,9 +20,6 @@ logger = logging.getLogger(__name__)
 # Channel-specific voices for brand identity
 VOICE_MAP = {
     "C1": "en-US-GuyNeural",       # Tech — authoritative male
-    "C2": "en-US-JennyNeural",     # Finance — clear female
-    "C3": "en-GB-RyanNeural",      # Science — British male
-    "C4": "en-US-AriaNeural",      # Lifestyle — warm female
     "C5": "en-US-DavisNeural",     # Productivity — calm male
     "default": "en-US-GuyNeural",
 }

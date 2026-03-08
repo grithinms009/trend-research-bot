@@ -1,15 +1,19 @@
 """
-Cinematic Subtitle Engine — film-grade ASS subtitle generator.
+Cinematic Subtitle Engine — retention-optimized caption beats for YouTube Shorts.
 
-Features:
-- Word-group timing (2-4 words max per display)
-- Emphasis word highlighting with scale animation
-- Cinematic typography (custom fonts, stroke, shadow)
-- Position control (center, upper_middle, lower_third)
-- Animation per directive (fade_pop, slide_up, word_by_word, scale_in)
-- Energy-reactive font sizing
-- Safe margins (avoid bottom cutoff on mobile)
-- Channel-specific styling from creative profiles
+Key design principles:
+- Caption beats, NOT sentences — 2-4 words per display
+- Power word highlighting with 110% scale animation
+- Pop-in animation at 105% base scale
+- Caption timing: 0.8-1.5s per beat
+- Bold sans-serif typography, center-bottom position
+- Max width 70% of screen, soft black shadow
+- Energy-reactive chunk sizing and font scale
+- Channel-specific accent colors and typography
+
+Example caption beat breakdown:
+  Input:  "This AI tool can automate your entire workflow."
+  Output: THIS AI TOOL | CAN AUTOMATE | YOUR ENTIRE | **WORKFLOW**
 """
 
 import os
@@ -24,7 +28,8 @@ def _load_channel_config() -> Dict:
     base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     path = os.path.join(base, "app", "config", "channels.yaml")
     with open(path) as f:
-        return yaml.safe_load(f).get("channels", {})
+        raw = yaml.safe_load(f) or {}
+    return raw.get("channels", {}) if isinstance(raw, dict) else {}
 
 
 def _hex_to_ass(hex_color: str) -> str:
@@ -53,32 +58,58 @@ POSITION_MAP = {
 # ============================================================
 # TEXT ANIMATION → ASS OVERRIDE TAGS
 # ============================================================
+# ============================================================
+# POWER WORDS — auto-detected for emphasis even if scene planner misses them
+# ============================================================
+POWER_WORDS = {
+    # Impact
+    "breaking", "shocking", "insane", "massive", "billion", "trillion",
+    "destroyed", "crashed", "exploded", "exposed", "leaked", "banned",
+    # Urgency
+    "now", "urgent", "emergency", "critical", "immediately", "warning",
+    # Scale
+    "everything", "everyone", "never", "always", "impossible", "unstoppable",
+    "revolutionary", "unprecedented", "unbelievable", "incredible",
+    # Money
+    "free", "million", "profit", "wealth", "rich", "money", "fortune",
+    # Emotion
+    "secret", "hidden", "truth", "lies", "dangerous", "deadly",
+    "genius", "brilliant", "perfect", "ultimate", "powerful",
+    # Tech
+    "ai", "automate", "automation", "robot", "algorithm", "hack",
+}
+
+# Caption beat timing bounds (seconds)
+MIN_BEAT_DURATION = 0.8
+MAX_BEAT_DURATION = 1.5
+
+
 def _anim_fade_pop(word: str, is_emphasis: bool, accent: str) -> str:
-    """Fade in + slight scale pop."""
+    """Fade in + pop-in scale at 105%, emphasis at 110%."""
     if is_emphasis:
-        return f"{{\\fad(80,0)\\fscx130\\fscy130\\t(0,120,\\fscx100\\fscy100)\\c{accent}}}{word}"
-    return f"{{\\fad(80,0)\\fscx110\\fscy110\\t(0,100,\\fscx100\\fscy100)}}{word}"
+        return f"{{\\fad(60,0)\\fscx135\\fscy135\\t(0,100,\\fscx110\\fscy110)\\c{accent}}}{word}"
+    return f"{{\\fad(60,0)\\fscx115\\fscy115\\t(0,80,\\fscx105\\fscy105)}}{word}"
 
 
 def _anim_slide_up(word: str, is_emphasis: bool, accent: str) -> str:
-    """Slide up from below."""
+    """Slide up from below with emphasis scale."""
     if is_emphasis:
-        return f"{{\\move(0,30,0,0,0,100)\\c{accent}\\fscx120\\fscy120\\t(80,180,\\fscx100\\fscy100)}}{word}"
-    return f"{{\\move(0,20,0,0,0,80)}}{word}"
+        return f"{{\\move(0,30,0,0,0,80)\\c{accent}\\fscx125\\fscy125\\t(60,150,\\fscx110\\fscy110)}}{word}"
+    return f"{{\\move(0,20,0,0,0,60)\\fscx105\\fscy105\\t(0,60,\\fscx100\\fscy100)}}{word}"
 
 
 def _anim_word_by_word(word: str, is_emphasis: bool, accent: str) -> str:
-    """Simple appear with emphasis highlight."""
+    """Appear with pop-in at 105%, emphasis at 110%."""
     if is_emphasis:
-        return f"{{\\c{accent}\\fscx125\\fscy125\\t(0,150,\\fscx100\\fscy100)}}{word}"
-    return word
+        return f"{{\\c{accent}\\fscx130\\fscy130\\t(0,120,\\fscx110\\fscy110)}}{word}"
+    return f"{{\\fscx105\\fscy105\\t(0,80,\\fscx100\\fscy100)}}{word}"
 
 
 def _anim_scale_in(word: str, is_emphasis: bool, accent: str) -> str:
-    """Scale from 0 to full size."""
+    """Scale from 0 to 105%, emphasis to 110%."""
     if is_emphasis:
-        return f"{{\\fscx0\\fscy0\\t(0,120,\\fscx120\\fscy120)\\t(120,200,\\fscx100\\fscy100)\\c{accent}}}{word}"
-    return f"{{\\fscx0\\fscy0\\t(0,100,\\fscx100\\fscy100)}}{word}"
+        return f"{{\\fscx0\\fscy0\\t(0,100,\\fscx125\\fscy125)\\t(100,180,\\fscx110\\fscy110)\\c{accent}}}{word}"
+    return f"{{\\fscx0\\fscy0\\t(0,80,\\fscx105\\fscy105)\\t(80,140,\\fscx100\\fscy100)}}{word}"
 
 
 ANIM_FUNCS = {
@@ -150,6 +181,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         duration = float(scene.get("estimated_duration", 3.0))
         energy = scene.get("energy", 3)
         emphasis_words = set(w.lower() for w in scene.get("emphasis_words", []))
+        # Auto-detect power words beyond scene planner's emphasis list
+        emphasis_words |= POWER_WORDS
 
         # Cinematic director fields (or defaults)
         text_style = scene.get("text_style", "bold_impact" if energy >= 4 else "minimal")
@@ -176,19 +209,22 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             current_time += duration
             continue
 
-        # Word-group sizing: 2-4 words based on energy
+        # Caption beats: 2-4 words per beat based on energy
         if energy >= 5:
-            chunk_size = 2  # Fast, punchy
+            chunk_size = 2  # Fast, punchy — max retention
         elif energy >= 3:
             chunk_size = 3
         else:
             chunk_size = 4  # Calm, longer groups
 
+        # Split into caption beats (max 2 lines, 2-4 words each)
         chunks = []
         for i in range(0, len(words), chunk_size):
             chunks.append(words[i:i + chunk_size])
 
-        time_per_chunk = duration / max(len(chunks), 1)
+        # Enforce caption beat timing: 0.8-1.5s per beat
+        raw_time = duration / max(len(chunks), 1)
+        time_per_chunk = max(MIN_BEAT_DURATION, min(MAX_BEAT_DURATION, raw_time))
 
         # Add silence offset for pre_beat cut timing
         time_offset = 0.0

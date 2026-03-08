@@ -56,6 +56,7 @@ PIPELINE = [
     "app.workers.script_cleaner",
     "app.workers.scene_planner",
     "app.video.cinematic_director",
+    "app.video.subtitle_generator",          # v3: retention-optimized caption beats
     "app.video.copyright_guard",             # v2: copyright safety check
     "app.workers.voice_generator",
     # --- VIDEO PIPELINE ---
@@ -80,6 +81,7 @@ STAGE_DATA_DIRS = {
     "app.workers.script_cleaner": ("data/topic_scripts_clean", "cleaned_scripts"),
     "app.workers.scene_planner": ("data/scene_plans", "scene_planned"),
     "app.video.cinematic_director": ("data/directed_plans", "directed"),
+    "app.video.subtitle_generator": ("data/shorts/subs", "subtitles"),
     "app.video.copyright_guard": ("data/directed_plans", "copyright_checked"),
     "app.workers.voice_generator": ("data/audio", "audio"),
     "app.video.video_builder_shorts": ("data/shorts/final", "video"),

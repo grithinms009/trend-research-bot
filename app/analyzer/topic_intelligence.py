@@ -73,37 +73,11 @@ CHANNEL_NICHES = {
             "artificial intelligence", "machine learning", "ai agents", "llm",
             "robotics", "automation", "tech startup", "software", "cybersecurity",
             "chips", "semiconductor", "quantum computing", "ar vr",
+            "science discovery", "space exploration", "physics", "biology",
+            "climate", "crypto", "blockchain", "fintech",
         ],
-        "audience": "tech-savvy viewers interested in AI and emerging technology",
+        "audience": "tech-savvy viewers interested in AI, science, and emerging technology",
         "avoid": ["generic tech reviews", "phone unboxing", "gaming"],
-    },
-    "C2": {
-        "name": "Daily Market Bites",
-        "core_topics": [
-            "stock market", "investing", "crypto", "economy", "interest rates",
-            "earnings", "ipo", "startup funding", "real estate", "personal finance",
-        ],
-        "audience": "retail investors and business-minded viewers",
-        "avoid": ["get rich quick", "gambling", "forex signals"],
-    },
-    "C3": {
-        "name": "Did You Know",
-        "core_topics": [
-            "science discovery", "space exploration", "history", "archaeology",
-            "physics", "biology", "evolution", "ocean", "climate",
-            "psychology", "ancient civilization", "unexplained phenomena",
-        ],
-        "audience": "curious viewers who love mind-blowing facts",
-        "avoid": ["conspiracy theories", "pseudoscience", "unverified claims"],
-    },
-    "C4": {
-        "name": "Luxury / Travel Top 5",
-        "core_topics": [
-            "luxury travel", "exotic destinations", "premium hotels", "supercars",
-            "yacht", "fine dining", "architecture", "design", "fashion",
-        ],
-        "audience": "aspirational viewers interested in luxury and travel",
-        "avoid": ["budget travel", "backpacking", "hostels"],
     },
     "C5": {
         "name": "Life Hacks / Productivity",
@@ -111,6 +85,7 @@ CHANNEL_NICHES = {
             "productivity system", "habits", "time management", "morning routine",
             "self improvement", "career growth", "mental health", "focus",
             "stoicism", "side hustle", "learning techniques",
+            "entrepreneur", "remote work", "minimalism",
         ],
         "audience": "self-improvement focused viewers",
         "avoid": ["generic motivation", "hustle culture toxicity"],

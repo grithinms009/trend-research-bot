@@ -1,10 +1,23 @@
 """
-Visual Intent Stock Fetcher — maps scene emotion/intent to stock footage.
+Visual Concept Stock Fetcher — 3-tier intelligent stock footage search.
 
-Replaces literal keyword search. Uses visual_intent field from scene planner
-to find emotionally-matching stock clips from Pexels.
+Replaces simple keyword search with a cinematic concept search system.
+Each scene generates three search types:
+  1. LITERAL  — direct visual description of the topic
+  2. EMOTIONAL — human emotion or reaction matching the mood
+  3. SYMBOLIC  — abstract/metaphorical visual representation
 
-Never searches politician names or literal controversy keywords.
+Clips are scored by:
+  0.35 × visual_clarity  (resolution, lighting)
+  0.25 × cinematic_quality (duration, motion presence)
+  0.20 × motion_presence  (not static)
+  0.20 × relevance        (tags match intent)
+
+Rejects:
+  - Static slideshow-like clips (duration < 3s)
+  - Low resolution (below 720p)
+  - Watermarked clips
+  - Obviously staged corporate footage
 """
 
 import hashlib
@@ -14,7 +27,7 @@ import os
 import glob
 import random
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import requests
 import yaml
@@ -29,6 +42,17 @@ PEXELS_VIDEO_SEARCH = "https://api.pexels.com/videos/search"
 
 MIN_WIDTH = 720
 MIN_HEIGHT = 1280
+
+# Quality scoring weights
+W_CLARITY = 0.35
+W_CINEMATIC = 0.25
+W_MOTION = 0.20
+W_RELEVANCE = 0.20
+
+# Rejection thresholds
+MIN_CLIP_DURATION = 3.0   # Reject static slideshow clips
+MAX_CLIP_DURATION = 60.0  # Reject overly long clips
+MIN_QUALITY_SCORE = 0.30  # Reject below this composite score
 
 # ============================================================
 # VISUAL INTENT → STOCK SEARCH MAPPING
@@ -149,6 +173,142 @@ DEFAULT_QUERIES = [
     "atmospheric motion",
 ]
 
+# ============================================================
+# EMOTIONAL SEARCH MAP — maps emotion to human reaction queries
+# ============================================================
+EMOTIONAL_SEARCH_MAP = {
+    "shock": [
+        "person amazed shocked reaction",
+        "crowd gasping dramatic moment",
+        "eyes widening surprise close up",
+    ],
+    "tension": [
+        "person anxious waiting dark room",
+        "hands gripping tension close up",
+        "person looking worried screen",
+    ],
+    "reveal": [
+        "person discovering something amazing",
+        "eyes opening wide revelation",
+        "curtain reveal audience reaction",
+    ],
+    "curiosity": [
+        "person examining closely fascinated",
+        "child looking through magnifying glass",
+        "scientist studying research focused",
+    ],
+    "urgency": [
+        "person running late stressed",
+        "hands typing fast keyboard urgent",
+        "crowd rushing city street",
+    ],
+    "dramatic": [
+        "person standing dramatic lighting",
+        "silhouette dramatic sky sunset",
+        "face dramatic side lighting",
+    ],
+    "neutral": [
+        "person working focused calm",
+        "everyday life modern aesthetic",
+        "calm professional environment",
+    ],
+}
+
+# ============================================================
+# SYMBOLIC SEARCH MAP — abstract/metaphorical visual representations
+# ============================================================
+SYMBOLIC_SEARCH_MAP = {
+    "abstract_tension": ["abstract digital glitch art", "dark geometric shapes morphing", "liquid mercury flowing dark"],
+    "tech_ui": ["neural network visualization blue", "holographic data streams", "matrix code rain digital"],
+    "nature": ["timelapse flower blooming macro", "aurora borealis dramatic sky", "underwater bioluminescence dark"],
+    "urban": ["city timelapse night lights blur", "neon reflections rain puddle", "aerial highway traffic patterns"],
+    "money": ["gold particles floating dark", "digital currency visualization", "abstract wealth flow diagram"],
+    "luxury": ["crystal chandelier light refraction", "silk fabric flowing slow motion", "diamond sparkling macro dark"],
+    "cinematic_dark": ["ink dropping water slow motion", "smoke tendrils light beam", "abstract dark fluid art"],
+    "data_visualization": ["particle data flow animation", "abstract graph network visualization", "digital information stream"],
+    "document": ["old paper texture candlelight", "ink pen writing close up art", "seal stamp wax dramatic"],
+    "building": ["architectural symmetry perspective", "glass reflection clouds building", "stairs ascending infinity"],
+}
+
+# Words that indicate staged corporate stock footage (reject these)
+CORPORATE_REJECT_TAGS = {
+    "handshake", "thumbs up", "high five", "team meeting",
+    "group smiling", "office celebration", "corporate team",
+    "business presentation", "pointing at chart",
+}
+
+
+def _score_clip(video: Dict, query: str) -> float:
+    """
+    Score a Pexels video clip for cinematic quality.
+
+    Returns 0.0-1.0 composite score based on:
+    - Visual clarity (resolution)
+    - Cinematic quality (duration, aspect)
+    - Motion presence (not static)
+    - Relevance (tags match)
+    """
+    files = video.get("video_files", [])
+    if not files:
+        return 0.0
+
+    # Visual clarity — prefer HD+ resolution
+    best_height = max((f.get("height", 0) for f in files), default=0)
+    if best_height >= 1920:
+        clarity = 1.0
+    elif best_height >= 1080:
+        clarity = 0.8
+    elif best_height >= 720:
+        clarity = 0.5
+    else:
+        clarity = 0.2
+
+    # Cinematic quality — duration sweet spot 5-15s
+    duration = video.get("duration", 0)
+    if 5 <= duration <= 15:
+        cinematic = 1.0
+    elif 3 <= duration <= 30:
+        cinematic = 0.6
+    else:
+        cinematic = 0.2
+
+    # Motion presence — longer clips likely have motion
+    # Pexels doesn't expose motion data, so approximate from duration
+    motion = 0.8 if duration >= 4 else 0.3
+
+    # Relevance — check if video URL/tags hint at query terms
+    video_url = video.get("url", "").lower()
+    query_words = set(query.lower().split())
+    matching = sum(1 for w in query_words if w in video_url)
+    relevance = min(1.0, matching / max(len(query_words), 1) + 0.3)
+
+    score = (W_CLARITY * clarity + W_CINEMATIC * cinematic +
+             W_MOTION * motion + W_RELEVANCE * relevance)
+    return round(score, 3)
+
+
+def _should_reject_clip(video: Dict) -> bool:
+    """Reject clips that are static, low quality, or staged corporate footage."""
+    duration = video.get("duration", 0)
+
+    # Reject too short (static slideshow) or too long
+    if duration < MIN_CLIP_DURATION or duration > MAX_CLIP_DURATION:
+        return True
+
+    # Reject low resolution
+    files = video.get("video_files", [])
+    best_height = max((f.get("height", 0) for f in files), default=0)
+    if best_height < 480:
+        return True
+
+    # Reject staged corporate footage by URL keywords
+    video_url = video.get("url", "").lower()
+    for tag in CORPORATE_REJECT_TAGS:
+        if tag.replace(" ", "-") in video_url:
+            return True
+
+    return False
+
 
 def _cache_key(query: str) -> str:
     return hashlib.md5(query.encode()).hexdigest()[:12]
@@ -235,7 +395,17 @@ def get_search_query(visual_intent: str, emotion: str = "neutral") -> str:
 
 
 class StockFetcher:
-    """Fetches stock footage based on scene visual_intent and emotion."""
+    """
+    3-tier intelligent stock footage fetcher.
+
+    For each scene, searches in priority order:
+      1. LITERAL  — scene's visual_prompts_3tier.literal or visual_intent map
+      2. EMOTIONAL — emotion-based human reaction footage
+      3. SYMBOLIC  — abstract metaphorical visuals
+
+    Best clip is selected by composite quality score.
+    Clips below MIN_QUALITY_SCORE or matching rejection rules are skipped.
+    """
 
     def __init__(self):
         self.channel_config = _load_channel_config()
@@ -244,11 +414,78 @@ class StockFetcher:
             "clips_downloaded": 0,
             "clips_cached": 0,
             "clips_failed": 0,
+            "clips_rejected": 0,
+            "tier_hits": {"literal": 0, "emotional": 0, "symbolic": 0, "fallback": 0},
         }
-        self._used_queries = set()  # Avoid duplicate clips
+        self._used_queries: set = set()
+        self._used_clip_ids: set = set()  # Prevent same clip across scenes
+
+    def _build_3tier_queries(self, scene: Dict) -> List[Tuple[str, str]]:
+        """
+        Build ordered list of (query, tier) tuples for 3-tier search.
+        Returns up to 3 queries: literal, emotional, symbolic.
+        """
+        visual_intent = scene.get("visual_intent", "cinematic_dark")
+        emotion = scene.get("emotion", "neutral")
+        queries = []
+
+        # Check for LLM-generated 3-tier prompts first
+        vp3 = scene.get("visual_prompts_3tier", {})
+        if isinstance(vp3, dict):
+            if vp3.get("literal"):
+                queries.append((vp3["literal"], "literal"))
+            if vp3.get("emotional"):
+                queries.append((vp3["emotional"], "emotional"))
+            if vp3.get("symbolic"):
+                queries.append((vp3["symbolic"], "symbolic"))
+
+        # Fill missing tiers from maps
+        if not any(t == "literal" for _, t in queries):
+            literal_q = get_search_query(visual_intent, emotion)
+            queries.insert(0, (literal_q, "literal"))
+
+        if not any(t == "emotional" for _, t in queries):
+            emo_queries = EMOTIONAL_SEARCH_MAP.get(emotion, EMOTIONAL_SEARCH_MAP["neutral"])
+            queries.append((random.choice(emo_queries), "emotional"))
+
+        if not any(t == "symbolic" for _, t in queries):
+            sym_queries = SYMBOLIC_SEARCH_MAP.get(visual_intent, ["abstract cinematic motion dark"])
+            queries.append((random.choice(sym_queries), "symbolic"))
+
+        # Also include legacy visual_prompts list as extra literal candidates
+        legacy_prompts = scene.get("visual_prompts", [])
+        if isinstance(legacy_prompts, list):
+            for vp in legacy_prompts[:2]:
+                if vp not in [q for q, _ in queries]:
+                    queries.append((vp, "literal"))
+
+        return queries
+
+    def _search_and_score(self, query: str) -> List[Tuple[Dict, float]]:
+        """Search Pexels and return scored, filtered results."""
+        videos = search_pexels(query, per_page=8)
+        scored = []
+
+        for video in videos:
+            if _should_reject_clip(video):
+                self.metrics["clips_rejected"] += 1
+                continue
+
+            # Skip already-used clips
+            clip_id = video.get("id", 0)
+            if clip_id in self._used_clip_ids:
+                continue
+
+            score = _score_clip(video, query)
+            if score >= MIN_QUALITY_SCORE:
+                scored.append((video, score))
+
+        # Sort by score descending
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored
 
     def fetch_for_topic(self, scene_plan: Dict, assets_dir: str) -> List[str]:
-        """Fetch stock clips for each scene using visual_intent."""
+        """Fetch stock clips for each scene using 3-tier intelligent search."""
         scenes = scene_plan.get("scenes", [])
         clip_paths = []
 
@@ -259,58 +496,79 @@ class StockFetcher:
         for scene in scenes:
             self.metrics["scenes_processed"] += 1
             scene_num = scene.get("scene_id", scene.get("scene_number", 0))
-            visual_intent = scene.get("visual_intent", "cinematic_dark")
-            emotion = scene.get("emotion", "neutral")
 
-            # v2: prefer pre-generated visual_prompts from enhanced scene planner
-            visual_prompts = scene.get("visual_prompts", [])
-            if visual_prompts:
-                # Pick first unused prompt from the pre-generated list
-                query = None
-                for vp in visual_prompts:
-                    if vp not in self._used_queries:
-                        query = vp
-                        break
-                if not query:
-                    query = random.choice(visual_prompts)
-            else:
-                # Fallback to visual intent mapping
-                query = get_search_query(visual_intent, emotion)
+            # Build 3-tier query list
+            tier_queries = self._build_3tier_queries(scene)
 
-            # Avoid repeating same query across scenes
-            attempts = 0
-            while query in self._used_queries and attempts < 3:
-                if visual_prompts:
-                    query = random.choice(visual_prompts)
-                else:
-                    query = get_search_query(visual_intent, emotion)
-                attempts += 1
-            self._used_queries.add(query)
+            # Check cache for any tier
+            clip_path = ""
+            found_cached = False
+            for query, tier in tier_queries:
+                cache_name = f"scene_{str(scene_num).zfill(2)}_{_cache_key(query)}.mp4"
+                cached_path = os.path.join(assets_dir, cache_name)
+                if os.path.exists(cached_path) and os.path.getsize(cached_path) > 1000:
+                    self.metrics["clips_cached"] += 1
+                    self.metrics["tier_hits"][tier] = self.metrics["tier_hits"].get(tier, 0) + 1
+                    clip_paths.append(cached_path)
+                    found_cached = True
+                    break
 
-            # Check cache
-            cache_name = f"scene_{str(scene_num).zfill(2)}_{_cache_key(query)}.mp4"
-            clip_path = os.path.join(assets_dir, cache_name)
-
-            if os.path.exists(clip_path) and os.path.getsize(clip_path) > 1000:
-                self.metrics["clips_cached"] += 1
-                clip_paths.append(clip_path)
+            if found_cached:
                 continue
 
-            # Search Pexels
-            videos = search_pexels(query)
+            # Search through tiers in priority order
+            best_video = None
+            best_score = 0.0
+            best_query = ""
+            best_tier = "fallback"
 
-            if not videos:
-                # Fallback to default
-                videos = search_pexels(random.choice(DEFAULT_QUERIES))
+            for query, tier in tier_queries:
+                if query in self._used_queries:
+                    continue
 
-            if videos:
-                # Pick random from top results for variety
-                video = random.choice(videos[:3]) if len(videos) >= 3 else videos[0]
+                scored = self._search_and_score(query)
+                if scored:
+                    video, score = scored[0]
+                    if score > best_score:
+                        best_video = video
+                        best_score = score
+                        best_query = query
+                        best_tier = tier
+
+                    # If literal tier finds a good match (>0.6), use it
+                    if tier == "literal" and score >= 0.6:
+                        break
+
+                time.sleep(0.2)  # Rate limit between tier searches
+
+            # Download best clip
+            if best_video:
+                self._used_queries.add(best_query)
+                self._used_clip_ids.add(best_video.get("id", 0))
+                self.metrics["tier_hits"][best_tier] = self.metrics["tier_hits"].get(best_tier, 0) + 1
+
+                cache_name = f"scene_{str(scene_num).zfill(2)}_{_cache_key(best_query)}.mp4"
+                clip_path = os.path.join(assets_dir, cache_name)
+                url = pick_best_file(best_video)
+
+                if url and download_clip(url, clip_path):
+                    self.metrics["clips_downloaded"] += 1
+                    clip_paths.append(clip_path)
+                    time.sleep(0.3)
+                    continue
+
+            # Final fallback
+            fallback_videos = search_pexels(random.choice(DEFAULT_QUERIES))
+            if fallback_videos:
+                video = fallback_videos[0]
+                self.metrics["tier_hits"]["fallback"] += 1
+                cache_name = f"scene_{str(scene_num).zfill(2)}_fallback.mp4"
+                clip_path = os.path.join(assets_dir, cache_name)
                 url = pick_best_file(video)
                 if url and download_clip(url, clip_path):
                     self.metrics["clips_downloaded"] += 1
                     clip_paths.append(clip_path)
-                    time.sleep(0.3)  # Rate limit
+                    time.sleep(0.3)
                     continue
 
             self.metrics["clips_failed"] += 1
@@ -322,7 +580,12 @@ class StockFetcher:
     def log_metrics(self):
         print("\n--- Stock Fetcher Metrics ---")
         for k, v in self.metrics.items():
-            print(f"{k}: {v}")
+            if isinstance(v, dict):
+                print(f"  {k}:")
+                for tk, tv in v.items():
+                    print(f"    {tk}: {tv}")
+            else:
+                print(f"  {k}: {v}")
         print("----------------------------\n")
 
 

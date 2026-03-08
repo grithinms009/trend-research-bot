@@ -1,18 +1,15 @@
 """
 Keyword-based channel classifier.
 
-Channels:
-  C1 — AI / Tech News
-  C2 — Finance / Markets / Crypto
-  C3 — History / Science / Facts
-  C4 — Luxury / Travel
+Active channels:
+  C1 — AI / Tech / Science News
   C5 — Productivity / Life Hacks
 """
 
 from typing import Dict, List, Optional, Set
 
 CHANNEL_KEYWORDS = {
-    "C1": {  # AI News & Tools (Tech)
+    "C1": {  # AI News & Tools (Tech + Science)
         "ai", "artificial intelligence", "machine learning", "deep learning",
         "neural network", "gpt", "openai", "chatgpt", "llm", "generative ai",
         "robotics", "robot", "automation", "tech", "technology", "software",
@@ -22,35 +19,14 @@ CHANNEL_KEYWORDS = {
         "microsoft", "meta", "tesla", "nvidia", "quantum", "vr", "ar",
         "augmented reality", "virtual reality", "computer", "algorithm",
         "model", "transformer", "diffusion",
-    },
-    "C2": {  # Daily Market Bites (Finance)
-        "finance", "financial", "money", "investment", "investing", "investor",
-        "stock", "stocks", "market", "markets", "wall street", "nasdaq",
-        "s&p", "dow jones", "trading", "trader", "crypto", "cryptocurrency",
-        "bitcoin", "ethereum", "btc", "eth", "defi", "nft", "token",
-        "bank", "banking", "federal reserve", "fed", "interest rate",
-        "inflation", "recession", "gdp", "economy", "economic", "forex",
-        "commodity", "gold", "oil", "real estate", "mortgage", "ipo",
-        "earnings", "revenue", "profit", "dividend", "hedge fund",
-    },
-    "C3": {  # Did You Know (History/Science)
-        "history", "historical", "ancient", "civilization", "archaeology",
-        "science", "scientific", "research", "study", "discovery", "discovered",
-        "space", "nasa", "planet", "mars", "moon", "astronomy", "universe",
-        "physics", "quantum physics", "biology", "chemistry", "evolution",
-        "fossil", "dinosaur", "ocean", "climate", "environment", "nature",
-        "geology", "earthquake", "volcano", "genetics", "dna", "genome",
-        "experiment", "laboratory", "theory", "einstein", "newton",
-        "mathematics", "math", "fact", "facts", "trivia", "explained",
-    },
-    "C4": {  # Luxury / Travel Top 5
-        "luxury", "luxurious", "expensive", "premium", "elite", "exclusive",
-        "travel", "traveling", "destination", "vacation", "holiday", "resort",
-        "hotel", "villa", "yacht", "cruise", "island", "beach", "paradise",
-        "fashion", "designer", "brand", "gucci", "louis vuitton", "rolex",
-        "lamborghini", "ferrari", "bugatti", "supercar", "mansion", "penthouse",
-        "wealth", "wealthy", "billionaire", "millionaire", "lifestyle",
-        "gourmet", "michelin", "wine", "champagne", "first class", "private jet",
+        # Science / space (absorbed from former C3)
+        "science", "scientific", "research", "discovery", "discovered",
+        "space", "nasa", "planet", "mars", "moon", "astronomy",
+        "physics", "biology", "chemistry", "genetics", "dna", "genome",
+        "climate", "environment", "experiment",
+        # Crypto / fintech (tech-adjacent from former C2)
+        "crypto", "cryptocurrency", "bitcoin", "ethereum", "blockchain",
+        "defi", "nft", "fintech",
     },
     "C5": {  # Life Hacks / Productivity
         "productivity", "productive", "efficiency", "efficient", "organize",
@@ -61,20 +37,21 @@ CHANNEL_KEYWORDS = {
         "meditation", "mindfulness", "focus", "time management", "career",
         "work life balance", "burnout", "journal", "journaling", "stoic",
         "stoicism", "reading", "books", "learning", "skills", "side hustle",
+        "entrepreneur", "freelance", "remote work", "minimalism",
     },
 }
 
 
 def classify_channel(title: str, keywords: Optional[List[str]] = None) -> str:
     """
-    Classify a topic into a channel (C1–C5) based on keyword matching.
+    Classify a topic into a channel (C1 or C5) based on keyword matching.
 
     Args:
         title: The topic title.
         keywords: Optional list of extracted keywords.
 
     Returns:
-        Channel tag string, e.g. 'C1'.
+        Channel tag string: 'C1' or 'C5'.
     """
     # Build a combined text blob to match against
     text_parts = [title.lower()]

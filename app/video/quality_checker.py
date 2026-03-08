@@ -123,6 +123,138 @@ def check_scene_plan(directed_plan: Dict) -> List[str]:
     return issues
 
 
+def check_transitions(directed_plan: Dict) -> List[str]:
+    """Validate transition assignments for smoothness and variety."""
+    issues = []
+    scenes = directed_plan.get("scenes", [])
+    if not scenes:
+        return issues
+
+    prev_exit = ""
+    transition_types_used = set()
+
+    for scene in scenes:
+        sid = scene.get("scene_id", 0)
+        entry = scene.get("entry_transition", "")
+        exit_t = scene.get("exit_transition", "")
+
+        if not entry and not exit_t:
+            issues.append(f"Scene {sid}: no transitions assigned")
+            continue
+
+        # Consecutive identical transitions = monotonous
+        if entry == prev_exit and entry:
+            issues.append(f"Scene {sid}: entry '{entry}' repeats previous exit")
+
+        transition_types_used.add(entry)
+        transition_types_used.add(exit_t)
+        prev_exit = exit_t
+
+    # Check variety: at least 3 different transition types across scenes
+    if len(scenes) >= 4 and len(transition_types_used) < 3:
+        issues.append(f"Low transition variety: only {len(transition_types_used)} types used")
+
+    return issues
+
+
+def check_pacing(directed_plan: Dict) -> List[str]:
+    """Validate scene pacing — each scene should be 3-6 seconds."""
+    issues = []
+    scenes = directed_plan.get("scenes", [])
+
+    for scene in scenes:
+        sid = scene.get("scene_id", 0)
+        dur = float(scene.get("estimated_duration", 0))
+
+        if dur < 3.0:
+            issues.append(f"Scene {sid}: {dur:.1f}s too short (min 3s)")
+        elif dur > 6.0:
+            issues.append(f"Scene {sid}: {dur:.1f}s too long (max 6s)")
+
+    # First scene must be high energy (hook)
+    if scenes:
+        first_energy = int(scenes[0].get("energy", 0))
+        if first_energy < 4:
+            issues.append(f"Hook scene energy {first_energy}/5 is weak (need >= 4)")
+
+    # Last scene should create open loop
+    if scenes:
+        last_emotion = scenes[-1].get("emotion", "")
+        if last_emotion not in ("curiosity", "tension"):
+            issues.append(f"Last scene emotion '{last_emotion}' doesn't create open loop")
+
+    return issues
+
+
+def check_scene_diversity(directed_plan: Dict) -> Tuple[float, List[str]]:
+    """
+    Calculate scene diversity score (0.0-1.0) and flag issues.
+    Measures variety across visual_intent, camera_style, shot_type, and emotion.
+    """
+    issues = []
+    scenes = directed_plan.get("scenes", [])
+    if len(scenes) < 2:
+        return 1.0, issues
+
+    # Count unique values for each visual dimension
+    intents = set()
+    cameras = set()
+    shots = set()
+    emotions = set()
+
+    for scene in scenes:
+        intents.add(scene.get("visual_intent", ""))
+        cameras.add(scene.get("camera_style", scene.get("camera_motion", "")))
+        shots.add(scene.get("shot_type", ""))
+        emotions.add(scene.get("emotion", ""))
+
+    n = len(scenes)
+    # Diversity = average ratio of unique values to total scenes
+    intent_div = len(intents) / n
+    camera_div = len(cameras) / n
+    shot_div = len(shots) / n
+    emotion_div = len(emotions) / n
+
+    score = round((intent_div + camera_div + shot_div + emotion_div) / 4.0, 3)
+
+    if score < 0.4:
+        issues.append(f"Scene diversity score {score:.2f} is very low (need > 0.6)")
+    elif score < 0.6:
+        issues.append(f"Scene diversity score {score:.2f} is below target (need > 0.6)")
+
+    return score, issues
+
+
+def check_static_footage_ratio(directed_plan: Dict) -> Tuple[float, List[str]]:
+    """
+    Estimate ratio of static (no motion) footage.
+    Reject if > 40% static.
+    """
+    issues = []
+    scenes = directed_plan.get("scenes", [])
+    if not scenes:
+        return 0.0, issues
+
+    static_count = 0
+    total_duration = 0.0
+
+    for scene in scenes:
+        dur = float(scene.get("estimated_duration", 3.0))
+        total_duration += dur
+        camera = scene.get("camera_motion", scene.get("camera_style", ""))
+        movement = scene.get("movement", "")
+
+        if camera in ("static", "static_tension", "") and movement in ("static_tension", ""):
+            static_count += 1
+
+    ratio = static_count / max(len(scenes), 1)
+
+    if ratio > 0.4:
+        issues.append(f"Static footage ratio {ratio:.0%} exceeds 40% limit")
+
+    return round(ratio, 3), issues
+
+
 def run_quality_check(video_path: str, scene_plan: Dict) -> Dict:
     """Run all quality checks on a rendered video."""
     results = {
@@ -157,6 +289,28 @@ def run_quality_check(video_path: str, scene_plan: Dict) -> Dict:
     plan_issues = check_scene_plan(scene_plan)
     results["checks"]["scene_plan"] = {"ok": len(plan_issues) == 0, "issues": plan_issues}
     results["issues"].extend(plan_issues)
+
+    # Transition quality checks
+    transition_issues = check_transitions(scene_plan)
+    results["checks"]["transitions"] = {"ok": len(transition_issues) == 0, "issues": transition_issues}
+    results["issues"].extend(transition_issues)
+
+    # Pacing validation
+    pacing_issues = check_pacing(scene_plan)
+    results["checks"]["pacing"] = {"ok": len(pacing_issues) == 0, "issues": pacing_issues}
+    results["issues"].extend(pacing_issues)
+
+    # Scene diversity score
+    diversity_score, diversity_issues = check_scene_diversity(scene_plan)
+    results["checks"]["diversity"] = {"ok": diversity_score >= 0.6, "score": diversity_score, "issues": diversity_issues}
+    results["issues"].extend(diversity_issues)
+
+    # Static footage ratio
+    static_ratio, static_issues = check_static_footage_ratio(scene_plan)
+    results["checks"]["static_footage"] = {"ok": static_ratio <= 0.4, "ratio": static_ratio, "issues": static_issues}
+    if static_ratio > 0.4:
+        results["passed"] = False
+    results["issues"].extend(static_issues)
 
     # File size check
     if os.path.exists(video_path):

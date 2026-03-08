@@ -30,24 +30,6 @@ VISUAL_STYLE_PALETTES = {
         {"color_grade": "neutral", "dominant_mood": "analytical", "stock_bias": "data_visualization"},
         {"color_grade": "dramatic", "dominant_mood": "intense", "stock_bias": "urban"},
     ],
-    "C2": [  # Finance
-        {"color_grade": "neutral", "dominant_mood": "professional", "stock_bias": "data_visualization"},
-        {"color_grade": "cool_news", "dominant_mood": "urgent", "stock_bias": "urban"},
-        {"color_grade": "cinematic_dark", "dominant_mood": "dramatic", "stock_bias": "money"},
-        {"color_grade": "dramatic", "dominant_mood": "intense", "stock_bias": "building"},
-    ],
-    "C3": [  # History / Science
-        {"color_grade": "cinematic_dark", "dominant_mood": "mysterious", "stock_bias": "nature"},
-        {"color_grade": "warm_luxury", "dominant_mood": "wonder", "stock_bias": "timeline"},
-        {"color_grade": "dramatic", "dominant_mood": "epic", "stock_bias": "cinematic_dark"},
-        {"color_grade": "neutral", "dominant_mood": "educational", "stock_bias": "medical"},
-    ],
-    "C4": [  # Luxury / Travel
-        {"color_grade": "warm_luxury", "dominant_mood": "aspirational", "stock_bias": "luxury"},
-        {"color_grade": "bright_clean", "dominant_mood": "vibrant", "stock_bias": "nature"},
-        {"color_grade": "cinematic_dark", "dominant_mood": "cinematic", "stock_bias": "urban"},
-        {"color_grade": "neutral", "dominant_mood": "elegant", "stock_bias": "building"},
-    ],
     "C5": [  # Productivity
         {"color_grade": "bright_clean", "dominant_mood": "clean", "stock_bias": "document"},
         {"color_grade": "neutral", "dominant_mood": "calm", "stock_bias": "nature"},
@@ -122,6 +104,27 @@ INTENT_ALTERNATIVES = {
 }
 
 
+# Maximum prompt history to track for similarity
+PROMPT_HISTORY_SIZE = 50
+
+# Similarity threshold — regenerate prompt if similarity > this
+SIMILARITY_THRESHOLD = 0.75
+
+
+def _word_set(text: str) -> Set[str]:
+    """Extract normalized word set from a prompt string."""
+    return set(text.lower().split())
+
+
+def _jaccard_similarity(a: Set[str], b: Set[str]) -> float:
+    """Jaccard similarity between two word sets (0.0-1.0)."""
+    if not a or not b:
+        return 0.0
+    intersection = len(a & b)
+    union = len(a | b)
+    return intersection / union if union > 0 else 0.0
+
+
 class VisualDiversityEngine:
     """
     Ensures visual diversity across videos within the same channel.
@@ -131,6 +134,7 @@ class VisualDiversityEngine:
     - Which visual intents have been assigned per video
     - Which stock search queries have been used (prevents duplicate clips)
     - Camera motion and cut timing sequences
+    - Last 50 visual prompts with similarity threshold 0.75
     """
 
     def __init__(self):
@@ -138,10 +142,12 @@ class VisualDiversityEngine:
         self._used_intents_per_video: Dict[str, Set[str]] = defaultdict(set)
         self._used_queries_global: Set[str] = set()
         self._video_count_per_channel: Dict[str, int] = defaultdict(int)
+        self._prompt_history: List[str] = []  # Last N prompts for similarity check
         self.metrics = {
             "intents_diversified": 0,
             "palette_rotations": 0,
             "query_dedup_hits": 0,
+            "prompts_rejected_similar": 0,
         }
 
     def get_style_palette(self, channel_id: str) -> Dict:
@@ -185,12 +191,38 @@ class VisualDiversityEngine:
         used.add(choice)
         return choice
 
+    def is_prompt_similar(self, prompt: str) -> bool:
+        """
+        Check if a prompt is too similar to any of the last 50 tracked prompts.
+        Uses Jaccard word-overlap similarity with 0.75 threshold.
+        Returns True if prompt should be regenerated.
+        """
+        prompt_words = _word_set(prompt)
+        for prev in self._prompt_history:
+            prev_words = _word_set(prev)
+            sim = _jaccard_similarity(prompt_words, prev_words)
+            if sim >= SIMILARITY_THRESHOLD:
+                self.metrics["prompts_rejected_similar"] += 1
+                return True
+
+        # Track this prompt
+        self._prompt_history.append(prompt)
+        if len(self._prompt_history) > PROMPT_HISTORY_SIZE:
+            self._prompt_history.pop(0)
+
+        return False
+
     def is_query_used(self, query: str) -> bool:
-        """Check if a stock search query has been used globally."""
+        """Check if a stock search query has been used globally or is too similar."""
         key = hashlib.md5(query.lower().encode()).hexdigest()
         if key in self._used_queries_global:
             self.metrics["query_dedup_hits"] += 1
             return True
+
+        # Also check similarity against recent prompts
+        if self.is_prompt_similar(query):
+            return True
+
         self._used_queries_global.add(key)
         return False
 
