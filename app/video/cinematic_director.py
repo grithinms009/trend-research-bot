@@ -332,6 +332,9 @@ class CinematicDirector:
 
 def main():
     import yaml
+    from app.utils.pipeline_logger import StageLogger
+
+    slog = StageLogger("cinematic_director")
 
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     scene_plan_dir = os.path.join(base_dir, "data", "scene_plans")
@@ -348,10 +351,13 @@ def main():
 
     if not scene_files:
         print("No scene plans found for cinematic direction.")
+        slog.warning("No scene plans found", suggestion="Check scene_planner output")
+        slog.finish(success=False)
         return
 
     director = CinematicDirector()
     total = 0
+    total_transition_issues = 0
 
     for plan_path in scene_files:
         with open(plan_path) as f:
@@ -366,6 +372,9 @@ def main():
             total += 1
             title = plan.get("title", "?")[:50]
             n = len(directed["scenes"])
+            t_issues = len(directed.get("transition_issues", []))
+            total_transition_issues += t_issues
+            slog.event("topic_directed", {"title": title, "scenes": n, "transition_issues": t_issues})
             print(f"  Directed: {title} ({n} scenes)")
 
         fname = os.path.basename(plan_path)
@@ -373,9 +382,26 @@ def main():
         with open(outfile, "w") as f:
             json.dump(directed_plans, f, indent=2)
 
+    # Log metrics
+    slog.metric("topics_directed", total)
+    slog.metric("llm_used", director.metrics["llm_used"])
+    slog.metric("fallback_used", director.metrics["fallback_used"])
+    slog.metric("transition_issues", total_transition_issues)
+    if director.metrics["direction_times"]:
+        avg_time = sum(director.metrics["direction_times"]) / len(director.metrics["direction_times"])
+        slog.metric("avg_direction_time_s", round(avg_time, 2))
+
+    if director.metrics["fallback_used"] > director.metrics["llm_used"]:
+        slog.warning("High fallback rate for cinematic direction",
+                     suggestion="Check Ollama model availability or increase timeout")
+    if total_transition_issues > 2:
+        slog.warning(f"{total_transition_issues} transition issues detected",
+                     suggestion="Review transition variety and energy-tier matching")
+
     director.log_metrics()
     print(f"\nTotal topics directed: {total}")
     print(f"Output: {directed_dir}")
+    slog.finish(success=True)
 
 
 if __name__ == "__main__":

@@ -325,15 +325,22 @@ def run_quality_check(video_path: str, scene_plan: Dict) -> Dict:
 
 def main():
     """Run quality checks on all rendered shorts."""
+    from app.utils.pipeline_logger import StageLogger
+
+    slog = StageLogger("quality_checker")
+
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     finals_dir = os.path.join(base_dir, "data", "shorts", "final")
 
     if not os.path.exists(finals_dir):
         print("No rendered shorts to check.")
+        slog.warning("No rendered shorts found", suggestion="Check video_builder output")
+        slog.finish(success=False)
         return
 
     passed = 0
     failed = 0
+    all_issues = []
 
     for channel_dir in sorted(os.listdir(finals_dir)):
         channel_path = os.path.join(finals_dir, channel_dir)
@@ -352,15 +359,37 @@ def main():
                 passed += 1
             else:
                 failed += 1
+                slog.event("qc_failed", {"file": mp4, "issues": result["issues"][:5]})
+
+            all_issues.extend(result["issues"])
 
             print(f"  {status} {mp4}")
             for issue in result["issues"][:3]:
                 print(f"       {issue}")
 
+    slog.metric("videos_checked", passed + failed)
+    slog.metric("qc_passed", passed)
+    slog.metric("qc_failed", failed)
+
+    # Categorize issues for improvement suggestions
+    issue_categories = {}
+    for issue in all_issues:
+        key = issue.split(":")[0].strip() if ":" in issue else issue[:40]
+        issue_categories[key] = issue_categories.get(key, 0) + 1
+
+    slog.metric("issue_categories", issue_categories)
+
+    if failed > 0:
+        slog.warning(f"{failed}/{passed + failed} videos failed QC",
+                     suggestion="Review issue categories to prioritize fixes")
+    if not all_issues:
+        slog.event("all_passed", {"count": passed})
+
     print(f"\n--- Quality Check ---")
     print(f"Passed: {passed}")
     print(f"Failed: {failed}")
     print(f"---------------------")
+    slog.finish(success=failed == 0)
 
 
 if __name__ == "__main__":

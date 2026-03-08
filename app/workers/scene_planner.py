@@ -484,6 +484,10 @@ class ScenePlannerWorker:
 
 
 def main():
+    from app.utils.pipeline_logger import StageLogger
+
+    slog = StageLogger("scene_planner")
+
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     DATE_STR = datetime.now().strftime("%Y%m%d")
 
@@ -498,6 +502,8 @@ def main():
 
     if not os.path.exists(SCRIPTS_DIR):
         print("No scripts directory found. Skipping scene planning.")
+        slog.warning("No scripts directory found", suggestion="Check script_cleaner output")
+        slog.finish(success=False)
         return
 
     print(f"Planning scenes from: {SCRIPTS_DIR}")
@@ -506,10 +512,29 @@ def main():
     total = worker.process_scripts(SCRIPTS_DIR, SCENES_DIR)
     worker.log_metrics()
 
+    # Emit structured metrics
+    for k, v in worker.metrics.items():
+        if k == "planning_times" and v:
+            slog.metric("avg_planning_time_s", round(sum(v) / len(v), 2))
+        elif k != "planning_times":
+            slog.metric(k, v)
+
+    # Diversity engine metrics
+    for k, v in worker.diversity_engine.metrics.items():
+        slog.metric(k, v)
+
+    if worker.metrics["fallback_used"] > worker.metrics["llm_successes"]:
+        slog.warning("LLM fallback rate > 50%",
+                     suggestion="Check Ollama availability, increase timeout, or use faster model")
+    if worker.metrics.get("scenes_created", 0) == 0:
+        slog.error("No scenes created", detail="All scripts failed scene planning")
+
     if total == 0:
         print("No scene plans created.")
+        slog.finish(success=False)
     else:
         print(f"\n✅ Scene plans created: {total}")
+        slog.finish(success=True)
     print(f"Scene plans saved to: {SCENES_DIR}")
 
 

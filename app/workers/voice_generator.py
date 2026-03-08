@@ -191,4 +191,23 @@ class VoiceGeneratorWorker:
 
 
 if __name__ == "__main__":
-    VoiceGeneratorWorker().run()
+    from app.utils.pipeline_logger import StageLogger
+
+    slog = StageLogger("voice_generator")
+    worker = VoiceGeneratorWorker()
+    worker.run()
+
+    # Emit structured metrics
+    for k, v in worker.metrics.items():
+        if k == "scene_generation_times" and v:
+            slog.metric("avg_scene_gen_time_s", round(sum(v) / len(v), 2))
+        elif k != "scene_generation_times":
+            slog.metric(k, v)
+
+    if worker.metrics["scenes_failed"] > 0:
+        slog.warning(f"{worker.metrics['scenes_failed']} voice scenes failed",
+                     suggestion="Check edge-tts installation and internet connectivity")
+    if worker.metrics["scenes_generated"] == 0 and worker.metrics["scenes_total"] > 0:
+        slog.error("No voice audio generated", detail="All TTS calls failed")
+
+    slog.finish(success=worker.metrics["scenes_failed"] == 0)

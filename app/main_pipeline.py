@@ -22,6 +22,7 @@ import sys
 import json
 import glob
 import time
+import argparse
 import logging
 import subprocess
 from datetime import datetime
@@ -348,13 +349,55 @@ def print_health_report():
 
 
 def main():
+    parser = argparse.ArgumentParser(description="AI Factory Pipeline v3")
+    parser.add_argument(
+        "--start-from",
+        type=str,
+        default=None,
+        help="Resume pipeline from this stage (e.g. cinematic_director or app.video.cinematic_director)",
+    )
+    parser.add_argument(
+        "--list-stages",
+        action="store_true",
+        help="List all pipeline stages and exit",
+    )
+    args = parser.parse_args()
+
+    if args.list_stages:
+        print("Pipeline stages:")
+        for i, step in enumerate(PIPELINE, 1):
+            short = step.split(".")[-1]
+            print(f"  {i:2d}. {short:30s}  ({step})")
+        return
+
+    # Determine start index
+    start_idx = 0
+    if args.start_from:
+        query = args.start_from
+        matched = False
+        for i, step in enumerate(PIPELINE):
+            short_name = step.split(".")[-1]
+            if query == step or query == short_name:
+                start_idx = i
+                matched = True
+                break
+        if not matched:
+            print(f"❌ Unknown stage: '{query}'")
+            print("   Use --list-stages to see available stages.")
+            return
+
+    if start_idx > 0:
+        skipped = [s.split(".")[-1] for s in PIPELINE[:start_idx]]
+        print(f"\n⏩ Resuming pipeline — skipping: {', '.join(skipped)}")
+        print(f"   Starting from: {PIPELINE[start_idx]}\n")
+
     print("\n🚀 Starting AI Factory Pipeline\n")
     logging.info("========== PIPELINE START ==========")
 
     pipeline_start = time.time()
     halted = False
 
-    for step in PIPELINE:
+    for step in PIPELINE[start_idx:]:
         try:
             run_step(step)
 
