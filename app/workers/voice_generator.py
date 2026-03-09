@@ -28,6 +28,21 @@ VOICE_MAP = {
 SCENE_PAUSE_MS = 300
 
 
+def _get_audio_duration(path: str) -> float:
+    """Get actual audio duration in seconds via ffprobe."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return float(result.stdout.strip())
+    except Exception as exc:
+        logger.warning("ffprobe failed for %s: %s", path, exc)
+    return 0.0
+
+
 class VoiceGeneratorWorker:
     def __init__(self) -> None:
         self.metrics: Dict[str, Any] = {
@@ -152,6 +167,7 @@ class VoiceGeneratorWorker:
                 self.metrics["total_estimated_duration_sec"] += topic_duration
 
                 topic_dir = self._topic_output_dir(audio_root, topic_id)
+                durations: Dict[str, float] = {}  # actual audio durations
                 print(f"  '{title[:60]}' ({len(scenes)} scenes, {voice})")
 
                 for idx, scene in enumerate(scenes, start=1):
@@ -179,12 +195,24 @@ class VoiceGeneratorWorker:
                         if idx < len(scenes):
                             self._add_silence_padding(output_path, SCENE_PAUSE_MS)
 
+                        # Record actual audio duration
+                        real_dur = _get_audio_duration(output_path)
+                        if real_dur > 0:
+                            durations[f"scene_{str(scene_num).zfill(2)}"] = round(real_dur, 3)
+
                         self.metrics["scenes_generated"] += 1
                         self.metrics["scene_generation_times"].append(elapsed)
                         size_kb = os.path.getsize(output_path) / 1024
                         print(f"    scene_{str(scene_num).zfill(2)}.mp3 ({size_kb:.0f}KB, {elapsed}s)")
                     else:
                         self.metrics["scenes_failed"] += 1
+
+                # Save actual durations manifest
+                if durations:
+                    dur_path = os.path.join(topic_dir, "durations.json")
+                    with open(dur_path, "w") as f:
+                        json.dump(durations, f, indent=2)
+                    logger.info("Saved durations.json for %s (%d scenes)", topic_id, len(durations))
 
         self._log_metrics()
         g = self.metrics["scenes_generated"]

@@ -120,8 +120,10 @@ ANIM_FUNCS = {
 }
 
 
-def generate_ass_subtitle(scenes: List[Dict], channel_id: str, channel_config: Dict) -> str:
+def generate_ass_subtitle(scenes: List[Dict], channel_id: str, channel_config: Dict,
+                          durations_map: Dict = None) -> str:
     """Generate cinematic ASS subtitles with per-scene directives."""
+    durations_map = durations_map or {}
     ch = channel_config.get(channel_id, {})
     font_color = _hex_to_ass(ch.get("font_color", "#FFFFFF"))
     accent_color = _hex_to_ass(ch.get("accent_color", "#FFFF00"))
@@ -178,7 +180,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     for scene in scenes:
         narration = scene.get("narration", scene.get("text", ""))
-        duration = float(scene.get("estimated_duration", 3.0))
+        # Use actual audio duration if available, fallback to estimate
+        sid = scene.get("scene_id", scene.get("scene_number", 0))
+        scene_key = f"scene_{str(sid).zfill(2)}"
+        duration = durations_map.get(scene_key, float(scene.get("estimated_duration", 3.0)))
         energy = scene.get("energy", 3)
         emphasis_words = set(w.lower() for w in scene.get("emphasis_words", []))
         # Auto-detect power words beyond scene planner's emphasis list
@@ -263,11 +268,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return header + "\n".join(events) + "\n"
 
 
-def generate_subtitles_for_topic(scene_plan: Dict, output_path: str, channel_config: Dict):
+def generate_subtitles_for_topic(scene_plan: Dict, output_path: str, channel_config: Dict,
+                                 durations_map: Dict = None):
     """Generate .ass subtitle file for a topic."""
     channel = scene_plan.get("channel_id", "C1")
     scenes = scene_plan.get("scenes", [])
-    ass_content = generate_ass_subtitle(scenes, channel, channel_config)
+    ass_content = generate_ass_subtitle(scenes, channel, channel_config, durations_map)
     with open(output_path, "w") as f:
         f.write(ass_content)
 

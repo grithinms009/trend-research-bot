@@ -273,6 +273,17 @@ class ShortsVideoBuilder:
         os.makedirs(work_dir, exist_ok=True)
         os.makedirs(os.path.dirname(output), exist_ok=True)
 
+        # Load actual audio durations from voice generator
+        durations_map = {}
+        dur_path = os.path.join(audio_dir, "durations.json")
+        if os.path.exists(dur_path):
+            try:
+                with open(dur_path) as f:
+                    durations_map = json.load(f)
+                logger.info("Loaded actual durations for %d scenes", len(durations_map))
+            except Exception as exc:
+                logger.warning("Failed to load durations.json: %s", exc)
+
         # 1. Stock footage via visual intent
         assets = os.path.join(work_dir, "assets")
         os.makedirs(assets, exist_ok=True)
@@ -285,7 +296,9 @@ class ShortsVideoBuilder:
 
         for i, scene in enumerate(scenes):
             sid = scene.get("scene_id", scene.get("scene_number", i + 1))
-            duration = float(scene.get("estimated_duration", 3.0))
+            scene_key = f"scene_{str(sid).zfill(2)}"
+            # Use actual audio duration if available, fallback to estimate
+            duration = durations_map.get(scene_key, float(scene.get("estimated_duration", 3.0)))
 
             audio = os.path.join(audio_dir, f"scene_{str(sid).zfill(2)}.mp3")
             if not os.path.exists(audio):
@@ -311,9 +324,9 @@ class ShortsVideoBuilder:
         if not _concat_scenes(scene_clips, concat_path):
             return False
 
-        # 4. Burn cinematic subtitles
+        # 4. Burn cinematic subtitles (with actual audio durations)
         subs_path = os.path.join(work_dir, "subs.ass")
-        generate_subtitles_for_topic(plan, subs_path, self.channel_config)
+        generate_subtitles_for_topic(plan, subs_path, self.channel_config, durations_map)
 
         subtitled = os.path.join(work_dir, "subtitled.mp4")
         if not _add_subtitles(concat_path, subs_path, subtitled):
